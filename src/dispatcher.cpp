@@ -60,6 +60,7 @@ void dispatcher::start(uv_loop_t *new_loop, const char *ip, int port,
 void dispatcher::stop() noexcept
 {
     assert(loop);
+    close_connections(clients_idle);
     close_connections(clients_reading);
     close_connections(clients_scheduling);
     close_connections(clients_processing);
