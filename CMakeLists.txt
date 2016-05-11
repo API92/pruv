@@ -1,11 +1,11 @@
+project(pruv)
+cmake_minimum_required(VERSION 2.8)
+
 set(Systemd_DIR .)
 find_package(Systemd REQUIRED)
 include_directories(${SYSTEMD_INCLUDE_DIRS})
 include_directories(include)
 link_directories(${SYSTEMD_LIBRARY_DIRS})
-
-project(pruv)
-cmake_minimum_required(VERSION 2.8)
 
 add_library(${PROJECT_NAME}
     include/pruv/dispatcher.hpp
@@ -35,26 +35,20 @@ add_library(${PROJECT_NAME}
     src/worker_loop.cpp
 )
 
-set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_EXTENSIONS OFF)
-set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 14)
-set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD_REQUIRED ON)
-
-
-project(pruvd)
-cmake_minimum_required(VERSION 2.8)
-
-add_executable(${PROJECT_NAME}
+add_executable(${PROJECT_NAME}d
     daemon/main.cpp
 )
 
-add_dependencies(pruvd pruv)
-
-target_link_libraries(${PROJECT_NAME} http_parser)
-target_link_libraries(${PROJECT_NAME} pruv)
-target_link_libraries(${PROJECT_NAME} rt)
-target_link_libraries(${PROJECT_NAME} ${SYSTEMD_LIBRARIES})
-target_link_libraries(${PROJECT_NAME} uv)
+target_link_libraries(${PROJECT_NAME}d http_parser)
+target_link_libraries(${PROJECT_NAME}d pruv)
+target_link_libraries(${PROJECT_NAME}d rt)
+target_link_libraries(${PROJECT_NAME}d ${SYSTEMD_LIBRARIES})
+target_link_libraries(${PROJECT_NAME}d uv)
 
 set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_EXTENSIONS OFF)
 set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 14)
 set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD_REQUIRED ON)
+
+set_property(TARGET ${PROJECT_NAME}d PROPERTY CXX_EXTENSIONS OFF)
+set_property(TARGET ${PROJECT_NAME}d PROPERTY CXX_STANDARD 14)
+set_property(TARGET ${PROJECT_NAME}d PROPERTY CXX_STANDARD_REQUIRED ON)

@@ -50,15 +50,13 @@ int parse_int_arg(const char *s, const char *optname)
 int process_request(char * /*req*/, size_t /*req_len*/,
         pruv::shmem_buffer *buf_out) noexcept
 {
-    std::string resp =
+    static const std::string resp =
         u8"HTTP/1.1 200 OK\r\n"
-        u8"Content-Length: 30000002\r\n"
+        u8"Content-Length: 5\n"
         u8"Content-Type: text/html; charset=utf-8\r\n"
         u8"\r\n"
+        u8"123\r\n"
     ;
-    for (int i = 0; i < 300; ++i)
-        resp.push_back('0' + i % 10);
-    resp += "\r\n";
     buf_out->set_data_size(resp.size());
 
     if (buf_out->map_offset() ||
