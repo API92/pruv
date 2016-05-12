@@ -34,6 +34,8 @@ private:
 protected:
     /// Buffered tcp connection
     class tcp_context : private tcp_con, list_node<tcp_context> {
+    public:
+        virtual ~tcp_context() {}
     protected:
         /// Called before reading new message.
         /// If returns false, connection will be closed.
