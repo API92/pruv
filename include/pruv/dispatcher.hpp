@@ -17,8 +17,8 @@ namespace pruv {
 
 class dispatcher {
 public:
-    ~dispatcher();
-    /// new_loop and worker_name must be valid until stop called.
+    virtual ~dispatcher();
+    /// new_loop, worker_name and worker_args must be valid until stop called.
     void start(uv_loop_t *new_loop, const char *ip, int port,
             size_t workers_max, const char *worker_name,
             const char * const *worker_args) noexcept;

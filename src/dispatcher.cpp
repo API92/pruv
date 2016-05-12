@@ -29,6 +29,7 @@ dispatcher::~dispatcher()
     assert(!worker_args);
     assert(uv_is_closing((uv_handle_t *)&tcp_server));
 
+    assert(clients_idle.empty());
     assert(clients_reading.empty());
     assert(clients_scheduling.empty());
     assert(clients_processing.empty());
