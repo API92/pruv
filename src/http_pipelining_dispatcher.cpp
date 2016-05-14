@@ -87,6 +87,13 @@ http_pipelining_dispatcher::tcp_http_pipelining_context::request_protocol()
     return "HTTP";
 }
 
+bool http_pipelining_dispatcher::tcp_http_pipelining_context::inplace_response(
+        shmem_buffer *buf) noexcept
+{
+    assert(!buf);
+    return buf;
+}
+
 bool
 http_pipelining_dispatcher::tcp_http_pipelining_context::prepare_for_response()
     noexcept

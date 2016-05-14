@@ -88,6 +88,13 @@ const char * http_dispatcher::tcp_http_context::request_protocol() const
     return "HTTP";
 }
 
+bool http_dispatcher::tcp_http_context::inplace_response(shmem_buffer *buf)
+    noexcept
+{
+    assert(!buf);
+    return false;
+}
+
 bool http_dispatcher::tcp_http_context::prepare_for_response() noexcept
 {
     assert(req_end);

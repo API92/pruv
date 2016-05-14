@@ -390,23 +390,60 @@ void dispatcher::read_con_cb(tcp_context *con, ssize_t nread, const uv_buf_t *)
             log(LOG_DEBUG, "dispatcher::read_con_cb reading connection end");
             assert(con->list_id == tcp_context::LIST_READING ||
                    con->list_id == tcp_context::LIST_WRITING);
-            if (con->resp_buffers_num < RESPONSES_MAXDEPTH) {
-                move_to(tcp_context::LIST_SCHEDULING, con);
-                schedule();
-            }
-            else
-                // Don't schedule if responses queue is too large.
-                // schedule() will be called after sending all responses.
-                // Reading stopped until all responses sended and current
-                // request processed.
-                assert(con->list_id == tcp_context::LIST_WRITING);
+            respond_or_enqueue(con);
+            schedule();
         }
     }
+}
+
+void dispatcher::respond_or_enqueue(tcp_context *con) noexcept
+{
+    assert(con);
+    assert(con->list_id == tcp_context::LIST_READING ||
+           // in LIST_PROCESSING only after end of processing
+           con->list_id == tcp_context::LIST_PROCESSING ||
+           con->list_id == tcp_context::LIST_SCHEDULING ||
+           con->list_id == tcp_context::LIST_WRITING);
+    if (con->resp_buffers_num >= RESPONSES_MAXDEPTH) {
+        // Don't process new request if responses queue is too large.
+        // It will be done after sending all responses.
+        move_to(tcp_context::LIST_WRITING, con);
+        return;
+    }
+
+    if (!con->inplace_response(nullptr)) {
+        move_to(tcp_context::LIST_SCHEDULING, con);
+        return;
+    }
+
+    shmem_buffer_node *buf = get_buffer(false);
+    if (!buf) {
+        con->remove_from_dispatcher();
+        return;
+    }
+
+    buf->remove_from_list(); // was in in_use_bufs list
+    con->resp_buffers.push_back(buf);
+    ++con->resp_buffers_num;
+    move_to(tcp_context::LIST_WRITING, con);
+    if (!con->inplace_response(buf)) {
+        con->remove_from_dispatcher();
+        return;
+    }
+    if (con->resp_buffers_num == 1)
+        write_con(con);
 }
 
 void dispatcher::schedule() noexcept
 {
     assert(loop);
+    while (!clients_scheduling.empty() &&
+           clients_scheduling.front().inplace_response(nullptr)) {
+        tcp_context *con = &clients_scheduling.front();
+        respond_or_enqueue(con);
+        assert(con->empty() || con->list_id == tcp_context::LIST_WRITING);
+    }
+
     if (clients_scheduling.empty() ||
         (workers_cnt >= workers_max && free_workers.empty()))
         return;
@@ -554,15 +591,7 @@ void dispatcher::on_worker_read(worker_process *w, ssize_t nread,
         con = w->processed_con;
         w->processed_con = nullptr;
         con->worker = nullptr;
-        assert(!w->out_buf->map_offset());
-        assert(w->out_buf->map_ptr() == w->out_buf->map_begin());
-        assert(w->out_buf->map_begin() != w->out_buf->map_end());
-        assert(!w->out_buf->empty()); // Was in in_use_bufs list.
-        w->out_buf->set_data_size(resp_len);
-        w->out_buf->remove_from_list();
-        con->resp_buffers.push_back(w->out_buf);
-        ++con->resp_buffers_num;
-        w->out_buf = nullptr;
+        assert(con->list_id == tcp_context::LIST_PROCESSING);
 
         // May be some part of new request was readed with previous one (but
         // not parsed yet). If so parse it. Else simply reset request_size().
@@ -575,6 +604,21 @@ void dispatcher::on_worker_read(worker_process *w, ssize_t nread,
             con->remove_from_dispatcher();
             con = nullptr;
         }
+
+        assert(!w->out_buf->map_offset());
+        assert(w->out_buf->map_ptr() == w->out_buf->map_begin());
+        assert(w->out_buf->map_begin() != w->out_buf->map_end());
+        assert(!w->out_buf->empty()); // Was in in_use_bufs list.
+        w->out_buf->set_data_size(resp_len);
+        w->out_buf->remove_from_list();
+        con->resp_buffers.push_back(w->out_buf);
+        ++con->resp_buffers_num;
+        w->out_buf = nullptr;
+        // If resp_buffers_num becames 1 now then writing not started yet.
+        // If resp_buffers_num > 1 then writing of some other buffer already
+        // in progress.
+        if (con->resp_buffers_num == 1)
+            write_con(con);
     }
     else {
         // Connection was closed before worker processing finished.
@@ -589,13 +633,11 @@ void dispatcher::on_worker_read(worker_process *w, ssize_t nread,
 
     if (con) {
         // Reading now stopped, because connection was in processing list.
-        assert(con->list_id == tcp_context::LIST_PROCESSING);
         if (con->read_buffer && con->request_size())
             // With previous request the second request was fully readed too
-            // and was parsed in prepare_for_request(). Process it now.
-            // Don't check responses queue length here, but reading
-            // not started all the same.
-            move_to(tcp_context::LIST_SCHEDULING, con);
+            // and was parsed in prepare_for_request().
+            // Process it now or when responses queue will become empty.
+            respond_or_enqueue(con);
         else {
             move_to(tcp_context::LIST_WRITING, con);
             // After request processed start reading next.
@@ -604,11 +646,6 @@ void dispatcher::on_worker_read(worker_process *w, ssize_t nread,
                 con = nullptr;
             }
         }
-        // If resp_buffers_num becames 1 now then writing not started yet.
-        // If resp_buffers_num > 1 then writing of some other buffer already
-        // in progress.
-        if (con && con->resp_buffers_num == 1)
-            write_con(con);
     }
     schedule();
 }
@@ -619,8 +656,7 @@ void dispatcher::write_con(tcp_context *con) noexcept
     assert(!con->resp_buffers.empty());
     shmem_buffer_node *buf = &con->resp_buffers.front();
     // initialize for response before first chunk of data
-    if (!buf->map_offset() && buf->map_begin() == buf->map_ptr() &&
-        !con->prepare_for_response()) {
+    if (!buf->cur_pos() && !con->prepare_for_response()) {
         con->remove_from_dispatcher();
         return;
     }
@@ -701,13 +737,16 @@ void dispatcher::on_end_write_con(tcp_context *con) noexcept
         if (!con->resp_buffers.empty())
             write_con(con);
         else if (con->list_id == tcp_context::LIST_WRITING) {
+            // Connection not scheduled nor processed now.
+            // Therefore it's available to schedule it or start reading.
+
             if (con->read_buffer && con->request_size()) {
                 // Connection has fully readed request message but it's not in
                 // scheduling or processing list. It's because of schedule()
                 // wasn't called because of resp_buffers list was too large.
                 // Now resp_buffers list is empty, so call schedule() here.
                 // Reading stopped at this moment.
-                move_to(tcp_context::LIST_SCHEDULING, con);
+                respond_or_enqueue(con);
                 schedule();
             }
             else {

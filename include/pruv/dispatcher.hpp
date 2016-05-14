@@ -56,6 +56,11 @@ protected:
         virtual size_t request_size() const noexcept = 0;
         /// Returns protocol name for passing to worker.
         virtual const char * request_protocol() const noexcept = 0;
+        /// If called with buf == nullptr then returns true if inplace response
+        /// can be done else returns false.
+        /// If called with not null buf then makes response in buf and if
+        /// returns false then connection will be closed.
+        virtual bool inplace_response(shmem_buffer *buf) noexcept = 0;
         /// Called before starting new response message, received from worker.
         /// If returns false, connection will be closed.
         virtual bool prepare_for_response() noexcept = 0;
@@ -135,12 +140,15 @@ private:
     };
 
     bool start_server(const char *ip, int port) noexcept;
-    void on_connection(uv_stream_t *server, int status) noexcept;
     void stop_server() noexcept;
+    void on_connection(uv_stream_t *server, int status) noexcept;
 
     /// Close connections and release its resources.
     void close_connections(list_node<tcp_context> &list) noexcept;
 
+    /// If inplace response can be done then respond with it
+    /// else enqueue for processing request by worker.
+    void respond_or_enqueue(tcp_context *con) noexcept;
     /// Take one request and one worker and send request into worker.
     void schedule() noexcept;
 
