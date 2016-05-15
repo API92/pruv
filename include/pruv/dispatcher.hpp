@@ -71,6 +71,11 @@ protected:
         /// If returns false, connection will be closed.
         virtual bool finish_response() noexcept = 0;
 
+        /// Start reading connection in loop.
+        bool read_start() noexcept;
+        /// Stop reading connection in loop.
+        bool read_stop() noexcept;
+
     private:
         friend dispatcher;
         friend list_node;
@@ -173,8 +178,6 @@ private:
     /// in the buf_list.
     void close_buffers(list_node<shmem_buffer_node> &buf_list) noexcept;
 
-    /// Start reading connection in loop.
-    bool read_connection(tcp_context *con) noexcept;
     /// Prepare buffer for reading data from connection.
     void read_con_alloc_cb(tcp_context *con, size_t suggested_size,
             uv_buf_t *buf) noexcept;
@@ -199,7 +202,7 @@ private:
     static constexpr unsigned IDLE_TIMEOUT = 30'000;
     static constexpr unsigned READ_TIMEOUT = 10'000;
     static constexpr unsigned WRITE_TIMEOUT = 15'000;
-    static constexpr unsigned PROCESSING_TIMEOUT = 10'000;
+    static constexpr unsigned PROCESSING_TIMEOUT = 100'000;
     static constexpr unsigned KILL_TIMEOUT = 10'000;
     static constexpr unsigned TIMER_PERIOD = 5'000;
     static constexpr unsigned RESPONSES_MAXDEPTH = 10;

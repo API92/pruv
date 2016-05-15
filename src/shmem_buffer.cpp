@@ -218,13 +218,12 @@ bool shmem_buffer::close() noexcept
         free((void *)name_);
         name_ = nullptr;
     }
-    else
-        log(LOG_DEBUG, "Closed shared memory object, fd = %d", fd);
 
     if (::close(fd) == -1) {
         log_syserr(LOG_ERR, "shmem_buffer::close close");
         res = false;
     }
+    log(LOG_DEBUG, "Closed shared memory object, fd = %d", fd);
     fd = -1;
     file_size_ = 0;
     return res;

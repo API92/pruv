@@ -17,13 +17,13 @@ bool tcp_con::accept(uv_loop_t *loop, uv_stream_t *server, void *owner,
 
     int r;
     if ((r = uv_tcp_init(loop, this)) < 0) {
-        log_uv_error(LOG_ERR, "tcp_stream::accept uv_tcp_init", r);
+        log_uv_err(LOG_ERR, "tcp_stream::accept uv_tcp_init", r);
         close();
         return false;
     }
 
     if ((r = uv_accept(server, base<uv_stream_t *>())) < 0) {
-        log_uv_error(LOG_ERR, "tcp_stream::accept uv_accept", r);
+        log_uv_err(LOG_ERR, "tcp_stream::accept uv_accept", r);
         close();
         return false;
     }
@@ -31,12 +31,12 @@ bool tcp_con::accept(uv_loop_t *loop, uv_stream_t *server, void *owner,
     log(LOG_DEBUG, "tcp_stream::accept Connection accepted");
 
     if ((r = uv_tcp_keepalive(this, 1, 20)) < 0) {
-        log_uv_error(LOG_ERR, "tcp_con::accept uv_tcp_keepalive", r);
+        log_uv_err(LOG_ERR, "tcp_con::accept uv_tcp_keepalive", r);
         return true;
     }
     uv_os_fd_t fd;
     if ((r = uv_fileno(base<uv_handle_t *>(), &fd)) < 0) {
-        log_uv_error(LOG_ERR, "tcp_con::accept uv_fileno", r);
+        log_uv_err(LOG_ERR, "tcp_con::accept uv_fileno", r);
         return true;
     }
 

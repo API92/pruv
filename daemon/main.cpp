@@ -50,6 +50,7 @@ int parse_int_arg(const char *s, const char *optname)
 int process_request(char * /*req*/, size_t /*req_len*/,
         pruv::shmem_buffer *buf_out) noexcept
 {
+    sleep(10);
     static const std::string resp =
         u8"HTTP/1.1 200 OK\r\n"
         u8"Content-Length: 5\n"
@@ -149,7 +150,7 @@ int main(int argc, char * const *argv)
     int r;
     uv_loop_t loop;
     if ((r = uv_loop_init(&loop)) < 0) {
-        pruv::log_uv_error(LOG_EMERG, "uv_loop_init main loop", r);
+        pruv::log_uv_err(LOG_EMERG, "uv_loop_init main loop", r);
         return EXIT_FAILURE;
     }
 
@@ -157,11 +158,11 @@ int main(int argc, char * const *argv)
     int signum[3] = {SIGTERM, SIGINT, SIGHUP};
     for (size_t i = 0; i < sizeof(sig) / sizeof(*sig); ++i)
         if ((r = uv_signal_init(&loop, &sig[i])) < 0) {
-            pruv::log_uv_error(LOG_ERR, "uv_signal_init SIGTERM handler", r);
+            pruv::log_uv_err(LOG_ERR, "uv_signal_init SIGTERM handler", r);
             uv_close((uv_handle_t *)&sig[i], nullptr);
         }
         else if ((r = uv_signal_start(&sig[i], stop_handler, signum[i])) < 0) {
-            pruv::log_uv_error(LOG_ERR, "uv_signal_start SIGTERM handler", r);
+            pruv::log_uv_err(LOG_ERR, "uv_signal_start SIGTERM handler", r);
             uv_close((uv_handle_t *)&sig[i], nullptr);
         }
         else
@@ -177,14 +178,14 @@ int main(int argc, char * const *argv)
 
     for (uv_signal_t & sigi : sig) {
         if ((r = uv_signal_stop(&sigi)) < 0)
-            pruv::log_uv_error(LOG_ERR, "uv_signal_stop in SIGTERM handler", r);
+            pruv::log_uv_err(LOG_ERR, "uv_signal_stop in SIGTERM handler", r);
         uv_close((uv_handle_t *)&sigi, nullptr);
     }
     // Do one loop iteration to remove sigterm handler from loop.
     uv_run(&loop, UV_RUN_NOWAIT);
 
     if ((r = uv_loop_close(&loop)) < 0)
-        pruv::log_uv_error(LOG_ERR, "uv_loop_close main loop", r);
+        pruv::log_uv_err(LOG_ERR, "uv_loop_close main loop", r);
 
     if (daemon_or_worker == 1)
         pruv::log(LOG_NOTICE, "Daemon stopped.");
