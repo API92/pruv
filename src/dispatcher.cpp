@@ -258,18 +258,14 @@ void dispatcher::on_worker_exit(worker_process *w, int64_t exit_code, int sig)
 void dispatcher::on_connection(uv_stream_t *server, int status) noexcept
 {
     assert(loop);
-    if (status < 0) {
-        log_uv_err(LOG_ERR, "on_connection", status);
-        return;
-    }
+    if (status < 0)
+        return log_uv_err(LOG_ERR, "on_connection", status);
 
     log(LOG_DEBUG, "Connection received. Status = %d.", status);
 
     tcp_context *con = create_connection();
-    if (!con) {
-        log(LOG_ERR, "dispatcher::on_connection no memory for connection");
-        return;
-    }
+    if (!con)
+        return log(LOG_ERR, "dispatcher::on_connection no memory for connect");
 
     struct deleter {
         static void cb(tcp_con *p) {
@@ -283,10 +279,8 @@ void dispatcher::on_connection(uv_stream_t *server, int status) noexcept
         // deleter::cb will be called sometime later.
         return;
 
-    if (!con->read_start()) {
-        con->remove_from_dispatcher();
-        return;
-    }
+    if (!con->read_start())
+        return con->remove_from_dispatcher();
 
     move_to(tcp_context::LIST_IDLE, con);
 }
@@ -305,11 +299,9 @@ void dispatcher::read_con_alloc_cb(tcp_context *con, size_t suggested_size,
         if (!con->prepare_for_request(con->read_buffer))
             return;
     }
-    assert(!con->empty()); // connection must be in some list
+    assert(!con->empty()); // Connection can be in one of all lists now.
     if (con->list_id == tcp_context::LIST_IDLE ||
         con->list_id == tcp_context::LIST_READING)
-        // Update timeout for reading only if connection isn't writed now.
-        // Because writing is more important.
         move_to(tcp_context::LIST_READING, con);
     else if (con->list_id == tcp_context::LIST_WRITING)
         // May be client don't read response because it's sending requests now.
@@ -436,7 +428,7 @@ void dispatcher::schedule() noexcept
 
     tcp_context *con = nullptr;
     // take worker for request
-    worker_process &w = *free_workers.begin();
+    worker_process &w = free_workers.front();
     assert(w.io_state == worker_process::IO_IDLE);
     // pipe_buf_ptr moved to start when state became IO_IDLE
     assert(w.pipe_buf_ptr == w.pipe_buf);
@@ -553,8 +545,6 @@ void dispatcher::on_worker_read(worker_process *w, ssize_t nread,
         con->worker = nullptr;
         assert(con->list_id == tcp_context::LIST_PROCESSING);
 
-        // May be some part of new request was readed with previous one (but
-        // not parsed yet). If so parse it. Else simply reset request_size().
         assert(con->read_buffer == w->in_buf);
         if (con->request_pos() + con->request_size() >=
                 w->in_buf->data_size()) {
@@ -586,6 +576,8 @@ void dispatcher::on_worker_read(worker_process *w, ssize_t nread,
     free_workers.push_back(w);
 
     if (con) {
+        // May be some part of new request was readed with previous one (but
+        // not parsed yet). If so parse it. Else simply reset request_size().
         if (!con->prepare_for_request(con->read_buffer))
             con->remove_from_dispatcher();
         else {
@@ -886,10 +878,9 @@ void dispatcher::close_old_connections(list_node<tcp_context> &list) noexcept
 void dispatcher::tcp_context::remove_from_dispatcher() noexcept
 {
     dispatcher *d = reinterpret_cast<dispatcher *>(owner);
-    while (!resp_buffers.empty()) {
+    while (!resp_buffers.empty())
         d->return_buffer(&resp_buffers.front(), false);
-        --resp_buffers_num;
-    }
+    resp_buffers_num = 0;
 
     if (worker) {
         worker->processed_con = nullptr;
