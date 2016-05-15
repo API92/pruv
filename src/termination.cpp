@@ -8,18 +8,19 @@ namespace pruv {
 
 namespace {
 
-volatile int interrupted = 0;
+volatile interruption_type irq = IRQ_NONE;
 
 } // namespace
 
-void set_interruption() noexcept
+void set_interruption(interruption_type type) noexcept
 {
-    interrupted = 1;
+    if (type == IRQ_NONE || type > irq)
+        irq = type;
 }
 
-bool interruption_requested() noexcept
+interruption_type interruption_requested() noexcept
 {
-    return interrupted;
+    return irq;
 }
 
 } // namespace pruv

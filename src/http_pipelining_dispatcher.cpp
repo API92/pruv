@@ -26,17 +26,29 @@ bool
 http_pipelining_dispatcher::tcp_http_pipelining_context::prepare_for_request(
         shmem_buffer *buf) noexcept
 {
+    if (!req_end)
+        return true; // from on_end_write_con()
     http_parser_init(&parser_in, HTTP_REQUEST);
+    request_pos_ += request_len; // Skip previous request.
     request_len = 0;
     req_end = false;
-    if (!buf)
+    if (!buf) {
+        request_pos_ = 0;
         return true;
+    }
 
-    size_t rem_len = buf->data_size() - buf->cur_pos();
-    if (!buf->restart(buf->map_ptr(), buf->map_ptr() + rem_len))
-        return false;
-    buf->set_data_size(0); // Will be incremented by rem_len in parse_request().
-    return parse_request(buf, rem_len);
+    while (request_pos_ + request_len < buf->data_size()) {
+        if (!buf->seek(request_pos_ + request_len))
+            return false;
+        size_t len = std::min(buf->data_size() - buf->cur_pos(),
+                size_t(buf->map_end() - buf->map_ptr()));
+        assert(len);
+        if (!parse_request(buf, len))
+            return false;
+        if (req_end)
+            break;
+    }
+    return buf->seek(buf->data_size());
 }
 
 bool http_pipelining_dispatcher::tcp_http_pipelining_context::parse_request(
@@ -55,8 +67,11 @@ bool http_pipelining_dispatcher::tcp_http_pipelining_context::parse_request(
         }
     };
     settings.on_message_complete = cb::on_msg_compl;
+    ptrdiff_t diff = buf->cur_pos() - request_pos_ - request_len;
+    buf->move_ptr(-diff);
     size_t nparsed = http_parser_execute(&parser_in, &settings,
             buf->map_ptr(), len);
+    buf->move_ptr(diff);
     log(LOG_DEBUG, "Parsed %" PRIu64 " bytes of %" PRId64,
             (uint64_t)nparsed, (int64_t)len);
     if (!req_end && nparsed != len) {
@@ -68,8 +83,6 @@ bool http_pipelining_dispatcher::tcp_http_pipelining_context::parse_request(
         return false;
     }
 
-    buf->move_ptr(nparsed);
-    buf->set_data_size(buf->data_size() + len);
     request_len += nparsed;
     return true;
 }
@@ -78,6 +91,12 @@ size_t http_pipelining_dispatcher::tcp_http_pipelining_context::request_size()
     const noexcept
 {
     return req_end ? request_len : 0;
+}
+
+size_t http_pipelining_dispatcher::tcp_http_pipelining_context::request_pos()
+    const noexcept
+{
+    return request_pos_;
 }
 
 const char *

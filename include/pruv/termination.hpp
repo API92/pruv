@@ -6,8 +6,14 @@
 
 namespace pruv {
 
-void set_interruption() noexcept;
+enum interruption_type {
+    IRQ_NONE = 0, /// interruption not requested
+    IRQ_INT =  1,  /// interrupt current request
+    IRQ_TERM = 2  /// terminate process
+};
 
-bool interruption_requested() noexcept;
+void set_interruption(interruption_type type) noexcept;
+
+interruption_type interruption_requested() noexcept;
 
 } // namespace pruv

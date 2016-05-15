@@ -17,6 +17,7 @@ protected:
         virtual bool parse_request(shmem_buffer *buf, size_t len)
             noexcept override;
         virtual size_t request_size() const noexcept override;
+        virtual size_t request_pos() const noexcept override;
         virtual const char * request_protocol() const noexcept override;
         virtual bool inplace_response(shmem_buffer *buf) noexcept override;
         virtual bool prepare_for_response() noexcept override;
@@ -24,7 +25,7 @@ protected:
         virtual bool finish_response() noexcept override;
 
         http_parser parser;
-        size_t request_len;
+        size_t request_len = 0;
         bool req_end = false;
         /// Calculated while parsing response.
         /// Used when writing response finished.

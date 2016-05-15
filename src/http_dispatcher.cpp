@@ -26,13 +26,8 @@ void http_dispatcher::free_connection(tcp_context *con) noexcept
 bool http_dispatcher::tcp_http_context::prepare_for_request(shmem_buffer *buf)
     noexcept
 {
-    if (buf) {
-        if (!buf->reset_defaults(REQUEST_CHUNK))
-            return false;
-        buf->set_data_size(0);
-    }
-    if (req_end) // Protection from pipelining. Reset it after sending response.
-        return true;
+    if (req_end)
+        return !buf; // Protection from pipelining. Reset it after response end.
     assert(!request_len);
     http_parser_init(&parser, HTTP_REQUEST);
     request_len = 0;
@@ -59,7 +54,7 @@ bool http_dispatcher::tcp_http_context::parse_request(shmem_buffer *buf,
     };
     settings.on_message_complete = cb::on_msg_compl;
     size_t nparsed = http_parser_execute(&parser, &settings,
-            buf->map_ptr(), len);
+            buf->map_ptr() - len, len);
     log(LOG_DEBUG, "Parsed %" PRIu64 " bytes of %" PRId64,
             (uint64_t)nparsed, (int64_t)len);
     if (nparsed != len) {
@@ -71,8 +66,6 @@ bool http_dispatcher::tcp_http_context::parse_request(shmem_buffer *buf,
         return false;
     }
 
-    buf->move_ptr(len);
-    buf->set_data_size(buf->data_size() + len);
     request_len = buf->data_size();
     return true;
 }
@@ -80,6 +73,11 @@ bool http_dispatcher::tcp_http_context::parse_request(shmem_buffer *buf,
 size_t http_dispatcher::tcp_http_context::request_size() const noexcept
 {
     return req_end ? request_len : 0;
+}
+
+size_t http_dispatcher::tcp_http_context::request_pos() const noexcept
+{
+    return 0;
 }
 
 const char * http_dispatcher::tcp_http_context::request_protocol() const

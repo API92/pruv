@@ -51,9 +51,11 @@ protected:
             noexcept = 0;
         /// Called after request parsing.
         /// When this returns non zero length, message of this size will be
-        /// passed to the worker and reading from socket will be stopped until
-        /// worker finished.
+        /// passed to the worker.
         virtual size_t request_size() const noexcept = 0;
+        /// Called before passing request to the worker.
+        /// Returns request offset in the shared memory object.
+        virtual size_t request_pos() const noexcept = 0;
         /// Returns protocol name for passing to worker.
         virtual const char * request_protocol() const noexcept = 0;
         /// If called with buf == nullptr then returns true if inplace response
@@ -142,6 +144,9 @@ private:
         char *pipe_buf_ptr = pipe_buf;
         /// Request for writing task into worker's pipe.
         uv_write_t write_req;
+        /// Because waitpid() called before on_worker_exit(), we must know
+        /// that kill is not allowed inside on_worker_exit().
+        bool exited = false;
     };
 
     bool start_server(const char *ip, int port) noexcept;
@@ -202,7 +207,7 @@ private:
     static constexpr unsigned IDLE_TIMEOUT = 30'000;
     static constexpr unsigned READ_TIMEOUT = 10'000;
     static constexpr unsigned WRITE_TIMEOUT = 15'000;
-    static constexpr unsigned PROCESSING_TIMEOUT = 100'000;
+    static constexpr unsigned PROCESSING_TIMEOUT = 10'000;
     static constexpr unsigned KILL_TIMEOUT = 10'000;
     static constexpr unsigned TIMER_PERIOD = 5'000;
     static constexpr unsigned RESPONSES_MAXDEPTH = 10;

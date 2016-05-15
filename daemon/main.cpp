@@ -17,6 +17,7 @@
 
 #include <pruv/http_pipelining_dispatcher.hpp>
 #include <pruv/log.hpp>
+#include <pruv/termination.hpp>
 #include <pruv/worker_loop.hpp>
 
 std::unique_ptr<pruv::dispatcher> dispatcher;
@@ -50,7 +51,10 @@ int parse_int_arg(const char *s, const char *optname)
 int process_request(char * /*req*/, size_t /*req_len*/,
         pruv::shmem_buffer *buf_out) noexcept
 {
-    sleep(10);
+    if (pruv::interruption_requested()) {
+        buf_out->set_data_size(0);
+        return EXIT_SUCCESS;
+    }
     static const std::string resp =
         u8"HTTP/1.1 200 OK\r\n"
         u8"Content-Length: 5\n"
@@ -65,7 +69,7 @@ int process_request(char * /*req*/, size_t /*req_len*/,
         (ptrdiff_t)buf_out->data_size())
         if (!buf_out->reset_defaults(buf_out->data_size()))
             return EXIT_FAILURE;
-    assert(buf_out->map_ptr() == buf_out->map_begin());
+    assert(!buf_out->cur_pos());
     memcpy(buf_out->map_ptr(), resp.c_str(), buf_out->data_size());
     return EXIT_SUCCESS;
 }

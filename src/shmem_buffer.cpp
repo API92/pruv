@@ -198,6 +198,22 @@ bool shmem_buffer::restart(const char *l, const char *r) noexcept
     return res;
 }
 
+bool shmem_buffer::seek(size_t pos) noexcept
+{
+    size_t len = map_end_ - map_begin_;
+    if (map_offset_ <= pos && pos <= map_offset_ + len) {
+        move_ptr((ptrdiff_t)pos - (ptrdiff_t)cur_pos());
+        return true;
+    }
+    size_t base_pos = pos & ~PAGESIZE_MASK;
+    if (base_pos + len <= pos)
+        len += PAGESIZE;
+    if (!map(base_pos, len))
+        return false;
+    move_ptr(pos - base_pos);
+    return true;
+}
+
 bool shmem_buffer::reset_defaults(size_t default_size) noexcept
 {
     if (file_size_ != default_size && !resize(default_size))
