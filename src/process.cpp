@@ -32,8 +32,6 @@ bool process::start(uv_loop_t *loop, const char *file, const char * const *args,
     close_on_return close_in((uv_handle_t *)&in, close_cb);
     if ((r = uv_pipe_init(loop, &in, 0)) < 0) {
         log_uv_err(LOG_ERR, "process::start uv_pipe_init in", r);
-        if (deleter)
-            deleter(this);
         return false;
     }
 

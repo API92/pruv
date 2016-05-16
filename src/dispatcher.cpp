@@ -438,9 +438,9 @@ void dispatcher::schedule() noexcept
     while (!clients_scheduling.empty()) {
         con = &clients_scheduling.front();
         req_len = snprintf(w.pipe_buf, sizeof(w.pipe_buf),
-            "%s IN SHM %s %" PRIuPTR " from %" PRIuPTR " OUT SHM %s %" PRIuPTR
-            "\n", con->request_protocol(), con->read_buffer->name(),
-            con->request_size(), con->request_pos(),
+            "%s IN SHM %s %" PRIuPTR ", %" PRIuPTR
+            " OUT SHM %s %" PRIuPTR "\n", con->request_protocol(),
+            con->read_buffer->name(), con->request_pos(), con->request_size(),
             resp_buf->name(), resp_buf->file_size());
         if (req_len >= 0 && req_len < (int)sizeof(w.pipe_buf))
             break;
@@ -705,12 +705,6 @@ void dispatcher::on_end_write_con(tcp_context *con) noexcept
         con->remove_from_dispatcher();
 }
 
-void dispatcher::close_connections(list_node<tcp_context> &list) noexcept
-{
-    while (!list.empty())
-        list.front().remove_from_dispatcher();
-}
-
 void dispatcher::move_to(tcp_context::list_id_enum dst, tcp_context *con)
     noexcept
 {
@@ -848,8 +842,6 @@ void dispatcher::on_timer_tick() noexcept
 {
     assert(loop);
     uint64_t now = uv_now(loop);
-    while (!in_use_workers.empty() && in_use_workers.front().timeout <= now)
-        kill_worker(&in_use_workers.front());
     for (const worker_process &w : terminated_workers) {
         if (w.timeout > now)
             break;
@@ -858,9 +850,17 @@ void dispatcher::on_timer_tick() noexcept
         if (r < 0)
             log_uv_err(LOG_ERR, "dispatcher::on_timer_tick uv_process_kill", r);
     }
+    while (!in_use_workers.empty() && in_use_workers.front().timeout <= now)
+        kill_worker(&in_use_workers.front());
     close_old_connections(clients_idle);
     close_old_connections(clients_reading);
     close_old_connections(clients_writing);
+}
+
+void dispatcher::close_connections(list_node<tcp_context> &list) noexcept
+{
+    while (!list.empty())
+        list.front().remove_from_dispatcher();
 }
 
 void dispatcher::close_old_connections(list_node<tcp_context> &list) noexcept

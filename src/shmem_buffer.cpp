@@ -162,42 +162,6 @@ bool shmem_buffer::map(size_t offset, size_t size) noexcept
     return true;
 }
 
-bool shmem_buffer::restart(const char *l, const char *r) noexcept
-{
-    assert(l <= r);
-    if (l == r)
-        return unmap();
-    assert(map_end_ <= l || r <= map_begin_ ||
-           (map_begin_ <= l && r <= map_end_));
-    if (!map_offset_ && r - l <= map_end_ - map_begin_) {
-        memmove(map_begin_, l, r - l);
-        map_ptr_ = map_begin_;
-        return true;
-    }
-    size_t size = (r - l + PAGESIZE_MASK) & ~PAGESIZE_MASK;
-    char *dst = map_impl(0, size);
-    if (!dst)
-        return false;
-    // Source and destination can't overlap virtually (because of
-    // new mmap'ed region for destination).
-    // But check if they overlap phisically. If so memcpy is not allowed.
-    // memmove not allowed too because it takes into account only virtual
-    // overlapping and can select wrong direction.
-    if (map_begin_ <= l && r <= map_end_ &&
-        r - l > (ptrdiff_t)map_offset_ + (l - map_begin_)) {
-        char *p = dst;
-        while (l != r)
-            *p++ = *l++;
-    }
-    else
-        memcpy(dst, l, r - l);
-
-    bool res = unmap();
-    map_ptr_ = map_begin_ = dst;
-    map_end_ = map_begin_ + size;
-    return res;
-}
-
 bool shmem_buffer::seek(size_t pos) noexcept
 {
     size_t len = map_end_ - map_begin_;
@@ -205,10 +169,15 @@ bool shmem_buffer::seek(size_t pos) noexcept
         move_ptr((ptrdiff_t)pos - (ptrdiff_t)cur_pos());
         return true;
     }
+    assert(pos <= file_size_);
     size_t base_pos = pos & ~PAGESIZE_MASK;
     if (base_pos + len <= pos)
         len += PAGESIZE;
-    if (!map(base_pos, len))
+    if (base_pos + len > file_size_)
+        len = file_size_ - base_pos;
+    if (!unmap())
+        return false;
+    if (len && !map(base_pos, len))
         return false;
     move_ptr(pos - base_pos);
     return true;

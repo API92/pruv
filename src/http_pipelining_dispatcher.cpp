@@ -11,10 +11,10 @@
 
 namespace pruv {
 
-http_pipelining_dispatcher::tcp_http_pipelining_context *
+http_pipelining_dispatcher::http_pipelining_context *
 http_pipelining_dispatcher::create_connection() noexcept
 {
-    return new (std::nothrow) tcp_http_pipelining_context;
+    return new (std::nothrow) http_pipelining_context;
 }
 
 void http_pipelining_dispatcher::free_connection(tcp_context *con) noexcept
@@ -22,8 +22,7 @@ void http_pipelining_dispatcher::free_connection(tcp_context *con) noexcept
     delete_nothrow(con);
 }
 
-bool
-http_pipelining_dispatcher::tcp_http_pipelining_context::prepare_for_request(
+bool http_pipelining_dispatcher::http_pipelining_context::prepare_for_request(
         shmem_buffer *buf) noexcept
 {
     if (!req_end)
@@ -43,6 +42,7 @@ http_pipelining_dispatcher::tcp_http_pipelining_context::prepare_for_request(
         size_t len = std::min(buf->data_size() - buf->cur_pos(),
                 size_t(buf->map_end() - buf->map_ptr()));
         assert(len);
+        buf->move_ptr(len);
         if (!parse_request(buf, len))
             return false;
         if (req_end)
@@ -51,7 +51,7 @@ http_pipelining_dispatcher::tcp_http_pipelining_context::prepare_for_request(
     return buf->seek(buf->data_size());
 }
 
-bool http_pipelining_dispatcher::tcp_http_pipelining_context::parse_request(
+bool http_pipelining_dispatcher::http_pipelining_context::parse_request(
         shmem_buffer *buf, size_t len) noexcept
 {
     assert(!req_end);
@@ -68,10 +68,8 @@ bool http_pipelining_dispatcher::tcp_http_pipelining_context::parse_request(
     };
     settings.on_message_complete = cb::on_msg_compl;
     ptrdiff_t diff = buf->cur_pos() - request_pos_ - request_len;
-    buf->move_ptr(-diff);
     size_t nparsed = http_parser_execute(&parser_in, &settings,
-            buf->map_ptr(), len);
-    buf->move_ptr(diff);
+            buf->map_ptr() - diff, len);
     log(LOG_DEBUG, "Parsed %" PRIu64 " bytes of %" PRId64,
             (uint64_t)nparsed, (int64_t)len);
     if (!req_end && nparsed != len) {
@@ -87,34 +85,33 @@ bool http_pipelining_dispatcher::tcp_http_pipelining_context::parse_request(
     return true;
 }
 
-size_t http_pipelining_dispatcher::tcp_http_pipelining_context::request_size()
-    const noexcept
+size_t http_pipelining_dispatcher::http_pipelining_context::request_size() const
+    noexcept
 {
     return req_end ? request_len : 0;
 }
 
-size_t http_pipelining_dispatcher::tcp_http_pipelining_context::request_pos()
-    const noexcept
+size_t http_pipelining_dispatcher::http_pipelining_context::request_pos() const
+    noexcept
 {
     return request_pos_;
 }
 
 const char *
-http_pipelining_dispatcher::tcp_http_pipelining_context::request_protocol()
-    const noexcept
+http_pipelining_dispatcher::http_pipelining_context::request_protocol() const
+    noexcept
 {
     return "HTTP";
 }
 
-bool http_pipelining_dispatcher::tcp_http_pipelining_context::inplace_response(
+bool http_pipelining_dispatcher::http_pipelining_context::inplace_response(
         shmem_buffer *buf) noexcept
 {
     assert(!buf);
     return buf;
 }
 
-bool
-http_pipelining_dispatcher::tcp_http_pipelining_context::prepare_for_response()
+bool http_pipelining_dispatcher::http_pipelining_context::prepare_for_response()
     noexcept
 {
     http_parser_init(&parser_out, HTTP_RESPONSE);
@@ -122,7 +119,7 @@ http_pipelining_dispatcher::tcp_http_pipelining_context::prepare_for_response()
     return true;
 }
 
-bool http_pipelining_dispatcher::tcp_http_pipelining_context::parse_response(
+bool http_pipelining_dispatcher::http_pipelining_context::parse_response(
         shmem_buffer *buf) noexcept
 {
     http_parser_settings parser_settings;
@@ -143,7 +140,7 @@ bool http_pipelining_dispatcher::tcp_http_pipelining_context::parse_response(
     return true;
 }
 
-bool http_pipelining_dispatcher::tcp_http_pipelining_context::finish_response()
+bool http_pipelining_dispatcher::http_pipelining_context::finish_response()
     noexcept
 {
     return keep_alive;

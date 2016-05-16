@@ -27,9 +27,9 @@ int process_input(const char *s, request_handler handler)
     static thread_local char buf_out_name[256];
     static thread_local size_t buf_out_file_size;
 
-    int parsed = sscanf(s, "HTTP IN SHM %255s %" SCNuPTR " from %" SCNuPTR
-            " OUT SHM %255s %" SCNuPTR, buf_in_name, &buf_in_len, &buf_in_pos,
-            buf_out_name, &buf_out_file_size);
+    int parsed = sscanf(s, "HTTP IN SHM %255s %" SCNuPTR ", %" SCNuPTR
+            " OUT SHM %255s %" SCNuPTR, buf_in_name,
+            &buf_in_pos, &buf_in_len, buf_out_name, &buf_out_file_size);
     if (parsed != 5) {
         log(LOG_ERR, "Error parsing \"%s\"", s);
         return EXIT_FAILURE;

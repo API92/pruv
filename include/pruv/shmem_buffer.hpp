@@ -26,9 +26,12 @@ public:
     /// offset must be aligned to page size.
     /// size automatically aligned.
     bool map(size_t offset, size_t size) noexcept;
-    /// Map region from start of file and copy [l, r) to it.
-    bool restart(const char *l, const char *r) noexcept;
+    /// As if calls resize(default_size) and map(0, default_size).
     bool reset_defaults(size_t default_size) noexcept;
+    /// Maps region which contains pos.
+    bool seek(size_t pos) noexcept;
+    /// Unmaps memory, closes file descriptor and (if was created in open)
+    /// removes shared memory object from system.
     bool close() noexcept;
 
     const char * map_begin() const { return map_begin_; }
@@ -50,7 +53,6 @@ public:
         map_ptr_ += dif;
     }
     void set_data_size(size_t value) { data_size_ = value; }
-    bool seek(size_t pos) noexcept;
 
 private:
     char * map_impl(size_t offset, size_t size) const noexcept;

@@ -57,7 +57,7 @@ int process_request(char * /*req*/, size_t /*req_len*/,
     }
     static const std::string resp =
         u8"HTTP/1.1 200 OK\r\n"
-        u8"Content-Length: 5\n"
+        u8"Content-Length: 5\r\n"
         u8"Content-Type: text/html; charset=utf-8\r\n"
         u8"\r\n"
         u8"123\r\n"

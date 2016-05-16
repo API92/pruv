@@ -12,7 +12,7 @@ namespace pruv {
 
 class http_pipelining_dispatcher : public dispatcher {
 protected:
-    class tcp_http_pipelining_context : public tcp_context {
+    class http_pipelining_context : public tcp_context {
         virtual bool prepare_for_request(shmem_buffer * buf) noexcept override;
         virtual bool parse_request(shmem_buffer *buf, size_t len)
             noexcept override;
@@ -34,7 +34,7 @@ protected:
         bool keep_alive;
     };
 
-    virtual tcp_http_pipelining_context * create_connection() noexcept override;
+    virtual http_pipelining_context * create_connection() noexcept override;
     virtual void free_connection(tcp_context *con) noexcept override;
 };
 
