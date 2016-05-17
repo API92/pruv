@@ -285,7 +285,7 @@ void dispatcher::on_connection(uv_stream_t *server, int status) noexcept
     move_to(tcp_context::LIST_IDLE, con);
 }
 
-void dispatcher::read_con_alloc_cb(tcp_context *con, size_t suggested_size,
+void dispatcher::read_con_alloc_cb(tcp_context *con, size_t /*suggested_size*/,
         uv_buf_t *b) noexcept
 {
     assert(loop);
@@ -309,37 +309,30 @@ void dispatcher::read_con_alloc_cb(tcp_context *con, size_t suggested_size,
         move_to(tcp_context::LIST_WRITING, con);
 
     shmem_buffer_node *sh_buf = con->read_buffer;
-    if (sh_buf->map_ptr() == sh_buf->map_end()) {
-        // Mapped shared memory is full. Map other chunk.
-        size_t next_offs = sh_buf->cur_pos();
-        if (next_offs == sh_buf->file_size() &&
-            !sh_buf->resize(next_offs + suggested_size))
-            return;
-        size_t sz = std::min(sh_buf->file_size() - next_offs, suggested_size);
-        if (!sh_buf->map(next_offs, sz))
-            return;
-    }
+    if (!sh_buf->seek(sh_buf->data_size(), REQUEST_CHUNK))
+        return;
     *b = uv_buf_init(sh_buf->map_ptr(), sh_buf->map_end() - sh_buf->map_ptr());
+    con->reading_in_buf = true;
 }
 
 void dispatcher::read_con_cb(tcp_context *con, ssize_t nread, const uv_buf_t *)
     noexcept
 {
     assert(loop);
+    con->reading_in_buf = false;
     if (nread < 0) {
         log_uv_err(nread == UV_EOF ? LOG_DEBUG : LOG_ERR,
                 "dispatcher::read_con_cb", nread);
         con->remove_from_dispatcher();
     }
     else if (nread > 0) {
-        con->read_buffer->move_ptr(nread);
         con->read_buffer->set_data_size(con->read_buffer->data_size() + nread);
         // Parsing allowed only when previous request was processed.
         if (con->list_id == tcp_context::LIST_SCHEDULING ||
             con->list_id == tcp_context::LIST_PROCESSING)
             return;
 
-        if (!con->parse_request(con->read_buffer, nread))
+        if (!con->parse_request(con->read_buffer))
             return con->remove_from_dispatcher();
 
         // Fully received message to be processed.
@@ -350,6 +343,14 @@ void dispatcher::read_con_cb(tcp_context *con, ssize_t nread, const uv_buf_t *)
             respond_or_enqueue(con);
             schedule();
         }
+    }
+    else if (con->request_pos() == con->read_buffer->data_size()) {
+        /// There is no not parsed data now.
+        if (!con->worker)
+            return_buffer(con->read_buffer, true);
+        con->read_buffer = nullptr;
+        if (con->list_id == tcp_context::LIST_READING)
+            move_to(tcp_context::LIST_IDLE, con);
     }
 }
 
@@ -380,7 +381,7 @@ void dispatcher::respond_or_enqueue(tcp_context *con) noexcept
     if (!con->inplace_response(buf))
         return con->remove_from_dispatcher();
 
-    if (con->request_pos() + con->request_size() >=
+    if (!con->reading_in_buf && con->request_pos() + con->request_size() >=
             con->read_buffer->data_size()) {
         return_buffer(con->read_buffer, true);
         con->read_buffer = nullptr;
@@ -437,6 +438,7 @@ void dispatcher::schedule() noexcept
     int req_len = 0;
     while (!clients_scheduling.empty()) {
         con = &clients_scheduling.front();
+        assert(con->read_buffer);
         req_len = snprintf(w.pipe_buf, sizeof(w.pipe_buf),
             "%s IN SHM %s %" PRIuPTR ", %" PRIuPTR
             " OUT SHM %s %" PRIuPTR "\n", con->request_protocol(),
@@ -545,11 +547,12 @@ void dispatcher::on_worker_read(worker_process *w, ssize_t nread,
         con->worker = nullptr;
         assert(con->list_id == tcp_context::LIST_PROCESSING);
 
-        assert(con->read_buffer == w->in_buf);
-        if (con->request_pos() + con->request_size() >=
+        assert(!con->read_buffer || con->read_buffer == w->in_buf);
+        if (con->read_buffer && !con->reading_in_buf &&
+            con->request_pos() + con->request_size() >=
                 w->in_buf->data_size()) {
+            return_buffer(con->read_buffer, true);
             con->read_buffer = nullptr;
-            return_buffer(w->in_buf, true);
         }
         w->in_buf = nullptr;
 

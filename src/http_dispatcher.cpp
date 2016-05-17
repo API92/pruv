@@ -35,8 +35,8 @@ bool http_dispatcher::tcp_http_context::prepare_for_request(shmem_buffer *buf)
     return true;
 }
 
-bool http_dispatcher::tcp_http_context::parse_request(shmem_buffer *buf,
-        size_t len) noexcept
+bool http_dispatcher::tcp_http_context::parse_request(shmem_buffer *buf)
+    noexcept
 {
     assert(buf);
     if (req_end) // Protection from pipelining. Reset it after sending response.
@@ -53,10 +53,11 @@ bool http_dispatcher::tcp_http_context::parse_request(shmem_buffer *buf,
         }
     };
     settings.on_message_complete = cb::on_msg_compl;
+    buf->seek(request_len, REQUEST_CHUNK);
+    size_t len = buf->data_size() - buf->cur_pos();
     size_t nparsed = http_parser_execute(&parser, &settings,
-            buf->map_ptr() - len, len);
-    log(LOG_DEBUG, "Parsed %" PRIu64 " bytes of %" PRId64,
-            (uint64_t)nparsed, (int64_t)len);
+            buf->map_ptr(), len);
+    log(LOG_DEBUG, "Parsed %" PRIuPTR " bytes of %" PRIuPTR, nparsed, len);
     if (nparsed != len) {
         log(LOG_WARNING, "HTTP parsing error.");
         return false;

@@ -35,24 +35,11 @@ bool http_pipelining_dispatcher::http_pipelining_context::prepare_for_request(
         request_pos_ = 0;
         return true;
     }
-
-    while (request_pos_ + request_len < buf->data_size()) {
-        if (!buf->seek(request_pos_ + request_len))
-            return false;
-        size_t len = std::min(buf->data_size() - buf->cur_pos(),
-                size_t(buf->map_end() - buf->map_ptr()));
-        assert(len);
-        buf->move_ptr(len);
-        if (!parse_request(buf, len))
-            return false;
-        if (req_end)
-            break;
-    }
-    return buf->seek(buf->data_size());
+    return parse_request(buf);
 }
 
 bool http_pipelining_dispatcher::http_pipelining_context::parse_request(
-        shmem_buffer *buf, size_t len) noexcept
+        shmem_buffer *buf) noexcept
 {
     assert(!req_end);
     parser_in.data = &req_end;
@@ -67,21 +54,27 @@ bool http_pipelining_dispatcher::http_pipelining_context::parse_request(
         }
     };
     settings.on_message_complete = cb::on_msg_compl;
-    ptrdiff_t diff = buf->cur_pos() - request_pos_ - request_len;
-    size_t nparsed = http_parser_execute(&parser_in, &settings,
-            buf->map_ptr() - diff, len);
-    log(LOG_DEBUG, "Parsed %" PRIu64 " bytes of %" PRId64,
-            (uint64_t)nparsed, (int64_t)len);
-    if (!req_end && nparsed != len) {
-        log(LOG_WARNING, "HTTP parsing error.");
-        return false;
-    }
-    if (parser_in.upgrade) {
-        log(LOG_WARNING, "HTTP Upgrade not supported. Close connection.");
-        return false;
-    }
 
-    request_len += nparsed;
+    while (!req_end && request_pos_ + request_len < buf->data_size()) {
+        if (!buf->seek(request_pos_ + request_len, REQUEST_CHUNK))
+            return false;
+        size_t len = std::min(buf->data_size() - buf->cur_pos(),
+                size_t(buf->map_end() - buf->map_ptr()));
+        assert(len);
+        size_t nparsed = http_parser_execute(&parser_in, &settings,
+                buf->map_ptr(), len);
+        log(LOG_DEBUG, "Parsed %" PRIuPTR " bytes of %" PRIuPTR " starting from"
+                " %" PRIuPTR, nparsed, len, request_pos_ + request_len);
+        if (!req_end && nparsed != len) {
+            log(LOG_WARNING, "HTTP parsing error.");
+            return false;
+        }
+        if (parser_in.upgrade) {
+            log(LOG_WARNING, "HTTP Upgrade not supported. Close connection.");
+            return false;
+        }
+        request_len += nparsed;
+    }
     return true;
 }
 

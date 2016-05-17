@@ -47,8 +47,7 @@ protected:
         virtual bool prepare_for_request(shmem_buffer *buf) noexcept = 0;
         /// Called after reading len bytes into buffer.
         /// If returns false, connection will be closed.
-        virtual bool parse_request(shmem_buffer *buf, size_t len)
-            noexcept = 0;
+        virtual bool parse_request(shmem_buffer *buf) noexcept = 0;
         /// Called after request parsing.
         /// When this returns non zero length, message of this size will be
         /// passed to the worker.
@@ -105,6 +104,9 @@ protected:
             LIST_PROCESSING,
             LIST_WRITING
         } list_id;
+        /// Is true when exists uv_buf_t between alloc and read calbacks
+        /// based on read_buffer.
+        bool reading_in_buf = false;
     };
 
     /// Allocate connection structure.

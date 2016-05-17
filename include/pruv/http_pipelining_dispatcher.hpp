@@ -14,8 +14,7 @@ class http_pipelining_dispatcher : public dispatcher {
 protected:
     class http_pipelining_context : public tcp_context {
         virtual bool prepare_for_request(shmem_buffer * buf) noexcept override;
-        virtual bool parse_request(shmem_buffer *buf, size_t len)
-            noexcept override;
+        virtual bool parse_request(shmem_buffer *buf) noexcept override;
         virtual size_t request_size() const noexcept override;
         virtual size_t request_pos() const noexcept override;
         virtual const char * request_protocol() const noexcept override;

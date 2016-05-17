@@ -29,7 +29,7 @@ public:
     /// As if calls resize(default_size) and map(0, default_size).
     bool reset_defaults(size_t default_size) noexcept;
     /// Maps region which contains pos.
-    bool seek(size_t pos) noexcept;
+    bool seek(size_t pos, size_t segment_size) noexcept;
     /// Unmaps memory, closes file descriptor and (if was created in open)
     /// removes shared memory object from system.
     bool close() noexcept;

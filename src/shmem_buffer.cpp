@@ -162,22 +162,20 @@ bool shmem_buffer::map(size_t offset, size_t size) noexcept
     return true;
 }
 
-bool shmem_buffer::seek(size_t pos) noexcept
+bool shmem_buffer::seek(size_t pos, size_t segment_size) noexcept
 {
-    size_t len = map_end_ - map_begin_;
-    if (map_offset_ <= pos && pos <= map_offset_ + len) {
+    if (map_offset_ <= pos && pos < map_offset_ + (map_end_ - map_begin_)) {
         move_ptr((ptrdiff_t)pos - (ptrdiff_t)cur_pos());
         return true;
     }
-    assert(pos <= file_size_);
     size_t base_pos = pos & ~PAGESIZE_MASK;
-    if (base_pos + len <= pos)
-        len += PAGESIZE;
-    if (base_pos + len > file_size_)
-        len = file_size_ - base_pos;
-    if (!unmap())
+    if (base_pos + segment_size <= pos)
+        segment_size += PAGESIZE;
+    if (base_pos == file_size_ && !resize(base_pos + segment_size))
         return false;
-    if (len && !map(base_pos, len))
+    if (base_pos + segment_size > file_size_)
+        segment_size = file_size_ - base_pos;
+    if (!map(base_pos, segment_size))
         return false;
     move_ptr(pos - base_pos);
     return true;
