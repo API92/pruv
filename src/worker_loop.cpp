@@ -51,8 +51,7 @@ int process_input(const char *s, request_handler handler)
         if (!buf_in->map(buf_in_base_pos, in_len))
             return EXIT_FAILURE;
     }
-    if (!buf_in->seek(buf_in_pos, in_len))
-        return EXIT_FAILURE;
+    buf_in->move_ptr((ptrdiff_t)buf_in_pos - (ptrdiff_t)buf_in->cur_pos());
 
     shmem_buffer *buf_out = buf_out_cache.get(buf_out_name);
     if (!buf_out)
