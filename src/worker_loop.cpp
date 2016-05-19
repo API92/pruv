@@ -10,6 +10,7 @@
 #include <cstring>
 
 #include <signal.h>
+#include <sys/prctl.h>
 #include <unistd.h>
 
 #include <pruv/log.hpp>
@@ -97,13 +98,20 @@ int worker_loop(request_handler handler)
     sigemptyset(&sigact.sa_mask);
     int r = sigaction(SIGTERM, &sigact, nullptr);
     if (r == -1)
-        log_syserr(LOG_ERR, "main sigaction(SIGTERM)");
+        log_syserr(LOG_ERR, "worker_loop sigaction(SIGTERM)");
     r = sigaction(SIGINT, &sigact, nullptr);
     if (r == -1)
-        log_syserr(LOG_ERR, "main sigaction(SIGINT)");
+        log_syserr(LOG_ERR, "worker_loop sigaction(SIGINT)");
     r = sigaction(SIGHUP, &sigact, nullptr);
     if (r == -1)
-        log_syserr(LOG_ERR, "main sigaction(SIGHUP)");
+        log_syserr(LOG_ERR, "worker_loop sigaction(SIGHUP)");
+    r = prctl(PR_SET_PDEATHSIG, SIGTERM, 0, 0, 0);
+    if (r == -1)
+        log_syserr(LOG_ERR, "worker_loop prctl");
+    if (getppid() == 1) {
+        log(LOG_ERR, "Orphaned at start. Exit.");
+        return EXIT_FAILURE;
+    }
 
     for (;;) {
         char *dst = ln;
