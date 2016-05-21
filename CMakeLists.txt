@@ -1,11 +1,14 @@
 project(pruv)
 cmake_minimum_required(VERSION 2.8)
 
-set(Systemd_DIR .)
-find_package(Systemd REQUIRED)
-include_directories(${SYSTEMD_INCLUDE_DIRS})
 include_directories(include)
-link_directories(${SYSTEMD_LIBRARY_DIRS})
+
+if (NOT Systemd_FOUND)
+    set(Systemd_DIR .)
+    find_package(Systemd REQUIRED)
+    include_directories(${SYSTEMD_INCLUDE_DIRS})
+    link_directories(${SYSTEMD_LIBRARY_DIRS})
+endif()
 
 add_library(${PROJECT_NAME}
     include/pruv/dispatcher.hpp
@@ -39,11 +42,17 @@ add_executable(${PROJECT_NAME}d
     daemon/main.cpp
 )
 
+target_link_libraries(${PROJECT_NAME} http_parser)
+target_link_libraries(${PROJECT_NAME} rt)
+target_link_libraries(${PROJECT_NAME} ${SYSTEMD_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} uv)
+
 target_link_libraries(${PROJECT_NAME}d http_parser)
 target_link_libraries(${PROJECT_NAME}d pruv)
 target_link_libraries(${PROJECT_NAME}d rt)
 target_link_libraries(${PROJECT_NAME}d ${SYSTEMD_LIBRARIES})
 target_link_libraries(${PROJECT_NAME}d uv)
+add_dependencies(${PROJECT_NAME}d ${PROJECT_NAME})
 
 set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_EXTENSIONS OFF)
 set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 14)
