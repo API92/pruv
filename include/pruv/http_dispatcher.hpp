@@ -14,6 +14,8 @@ class http_dispatcher : public dispatcher {
 protected:
     class tcp_http_context : public tcp_context {
         virtual bool prepare_for_request(shmem_buffer *) noexcept override;
+        virtual bool validate_request(const shmem_buffer *buf) const noexcept
+            override;
         virtual bool parse_request(shmem_buffer *buf) noexcept override;
         virtual size_t request_size() const noexcept override;
         virtual size_t request_pos() const noexcept override;

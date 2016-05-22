@@ -35,6 +35,12 @@ bool http_dispatcher::tcp_http_context::prepare_for_request(shmem_buffer *buf)
     return true;
 }
 
+bool http_dispatcher::tcp_http_context::validate_request(const shmem_buffer *)
+    const noexcept
+{
+    return true;
+}
+
 bool http_dispatcher::tcp_http_context::parse_request(shmem_buffer *buf)
     noexcept
 {

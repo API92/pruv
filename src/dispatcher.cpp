@@ -270,8 +270,7 @@ void dispatcher::on_connection(uv_stream_t *server, int status) noexcept
     struct deleter {
         static void cb(tcp_con *p) {
             tcp_context *con = static_cast<tcp_context *>(p);
-            dispatcher *d = reinterpret_cast<dispatcher *>(con->owner);
-            d->free_connection(con);
+            con->get_dispatcher()->free_connection(con);
         }
     };
 
@@ -327,6 +326,9 @@ void dispatcher::read_con_cb(tcp_context *con, ssize_t nread, const uv_buf_t *)
     }
     else if (nread > 0) {
         con->read_buffer->set_data_size(con->read_buffer->data_size() + nread);
+        if (!con->validate_request(con->read_buffer))
+            return con->remove_from_dispatcher();
+
         // Parsing allowed only when previous request was processed.
         if (con->list_id == tcp_context::LIST_SCHEDULING ||
             con->list_id == tcp_context::LIST_PROCESSING)
@@ -643,6 +645,9 @@ void dispatcher::write_con(tcp_context *con) noexcept
         static void write(uv_write_t *req, int status) {
             tcp_context *con = static_cast<tcp_context *>(
                     tcp_con::from(req->handle));
+            if (!con->resp_buffers_num)
+                // Connection was closed and buffers was returned to pool.
+                return;
             size_t chunk_size = (size_t)req->data;
             if (status < 0) {
                 log_uv_err(LOG_ERR, "dispatcher::write_con cb::write", status);
@@ -651,7 +656,7 @@ void dispatcher::write_con(tcp_context *con) noexcept
             con->resp_buffers.front().move_ptr(chunk_size);
             log(LOG_DEBUG, "Response chunk of %" PRIuPTR " bytes written",
                     chunk_size);
-            reinterpret_cast<dispatcher *>(con->owner)->write_con(con);
+            con->get_dispatcher()->write_con(con);
         }
     };
 
@@ -878,11 +883,15 @@ void dispatcher::close_old_connections(list_node<tcp_context> &list) noexcept
 /// tcp_context
 ///
 
+dispatcher * dispatcher::tcp_context::get_dispatcher() const noexcept
+{
+    return reinterpret_cast<dispatcher *>(owner);
+}
+
 void dispatcher::tcp_context::remove_from_dispatcher() noexcept
 {
-    dispatcher *d = reinterpret_cast<dispatcher *>(owner);
     while (!resp_buffers.empty())
-        d->return_buffer(&resp_buffers.front(), false);
+        get_dispatcher()->return_buffer(&resp_buffers.front(), false);
     resp_buffers_num = 0;
 
     if (worker) {
@@ -895,7 +904,7 @@ void dispatcher::tcp_context::remove_from_dispatcher() noexcept
         }
     }
     else if (read_buffer)
-        d->return_buffer(read_buffer, true);
+        get_dispatcher()->return_buffer(read_buffer, true);
     read_buffer = nullptr;
 
     if (!empty()) // may be not in any list (for example, in schedule)
@@ -909,14 +918,12 @@ bool dispatcher::tcp_context::read_start() noexcept
     struct cb {
         static void alloc(uv_handle_t *h, size_t size, uv_buf_t *buf) {
             tcp_context *strm = static_cast<tcp_context *>(tcp_con::from(h));
-            dispatcher *d = reinterpret_cast<dispatcher *>(strm->owner);
-            d->read_con_alloc_cb(strm, size, buf);
+            strm->get_dispatcher()->read_con_alloc_cb(strm, size, buf);
         }
 
         static void read(uv_stream_t *s, ssize_t nread, const uv_buf_t *buf) {
             tcp_context *strm = static_cast<tcp_context *>(tcp_con::from(s));
-            dispatcher *d = reinterpret_cast<dispatcher *>(strm->owner);
-            d->read_con_cb(strm, nread, buf);
+            strm->get_dispatcher()->read_con_cb(strm, nread, buf);
         }
     };
 

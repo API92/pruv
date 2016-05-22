@@ -45,7 +45,12 @@ protected:
         /// It can be used to pass to the worker some headers from
         /// PROXY-protocol for every message, not only at connection start.
         virtual bool prepare_for_request(shmem_buffer *buf) noexcept = 0;
-        /// Called after reading len bytes into buffer.
+        /// Called after reading data into buffer.
+        /// If returns false, connection will be closed.
+        virtual bool validate_request(const shmem_buffer *buf) const
+            noexcept = 0;
+        /// Called after reading data into buffer when previous request is not
+        /// in processing.
         /// If returns false, connection will be closed.
         virtual bool parse_request(shmem_buffer *buf) noexcept = 0;
         /// Called after request parsing.
@@ -80,6 +85,7 @@ protected:
     private:
         friend dispatcher;
         friend list_node;
+        dispatcher * get_dispatcher() const noexcept;
         /// Remove connection from any dispatcher's list.
         /// Return used buffers into dispatcher.
         /// Break reference from worker to this connection.

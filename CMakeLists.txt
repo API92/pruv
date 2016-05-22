@@ -3,6 +3,10 @@ cmake_minimum_required(VERSION 2.8)
 
 include_directories(include)
 
+if (NOT Threads_FOUND)
+    find_package(Threads REQUIRED)
+endif()
+
 if (NOT Systemd_FOUND)
     set(Systemd_DIR .)
     find_package(Systemd REQUIRED)
@@ -42,17 +46,35 @@ add_executable(${PROJECT_NAME}d
     daemon/main.cpp
 )
 
+add_executable(${PROJECT_NAME}_test
+    test/fixtures.cpp
+    test/fixtures.hpp
+    test/main.cpp
+    test/send_recv_test.cpp
+    test/common_dispatcher.hpp
+    test/workers_reg.cpp
+    test/workers_reg.hpp
+)
+
 target_link_libraries(${PROJECT_NAME} http_parser)
 target_link_libraries(${PROJECT_NAME} rt)
 target_link_libraries(${PROJECT_NAME} ${SYSTEMD_LIBRARIES})
 target_link_libraries(${PROJECT_NAME} uv)
 
 target_link_libraries(${PROJECT_NAME}d http_parser)
-target_link_libraries(${PROJECT_NAME}d pruv)
+target_link_libraries(${PROJECT_NAME}d ${PROJECT_NAME})
 target_link_libraries(${PROJECT_NAME}d rt)
 target_link_libraries(${PROJECT_NAME}d ${SYSTEMD_LIBRARIES})
 target_link_libraries(${PROJECT_NAME}d uv)
 add_dependencies(${PROJECT_NAME}d ${PROJECT_NAME})
+
+target_link_libraries(${PROJECT_NAME}_test gtest)
+target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
+target_link_libraries(${PROJECT_NAME}_test rt)
+target_link_libraries(${PROJECT_NAME}_test ${SYSTEMD_LIBRARIES})
+target_link_libraries(${PROJECT_NAME}_test ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(${PROJECT_NAME}_test uv)
+add_dependencies(${PROJECT_NAME}_test ${PROJECT_NAME})
 
 set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_EXTENSIONS OFF)
 set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 14)
@@ -60,4 +82,8 @@ set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD_REQUIRED ON)
 
 set_property(TARGET ${PROJECT_NAME}d PROPERTY CXX_EXTENSIONS OFF)
 set_property(TARGET ${PROJECT_NAME}d PROPERTY CXX_STANDARD 14)
-set_property(TARGET ${PROJECT_NAME}d PROPERTY CXX_STANDARD_REQUIRED ON)
+set_property(TARGET ${PROJECT_NAME}d PROPERTY CXX_EXTENSIONS OFF)
+
+set_property(TARGET ${PROJECT_NAME}_test PROPERTY CXX_STANDARD 14)
+set_property(TARGET ${PROJECT_NAME}_test PROPERTY CXX_STANDARD_REQUIRED ON)
+set_property(TARGET ${PROJECT_NAME}_test PROPERTY CXX_STANDARD_REQUIRED ON)

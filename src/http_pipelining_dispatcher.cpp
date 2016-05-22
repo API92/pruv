@@ -22,6 +22,12 @@ void http_pipelining_dispatcher::free_connection(tcp_context *con) noexcept
     delete_nothrow(con);
 }
 
+bool http_pipelining_dispatcher::http_pipelining_context::validate_request(
+        const shmem_buffer *buf) const noexcept
+{
+    return buf->data_size() < 1024 * 1024;
+}
+
 bool http_pipelining_dispatcher::http_pipelining_context::prepare_for_request(
         shmem_buffer *buf) noexcept
 {
