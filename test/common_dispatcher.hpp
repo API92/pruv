@@ -14,10 +14,18 @@ template<typename ProdT>
 struct common_dispatcher : dispatcher {
     using dispatcher::tcp_context;
 
+    common_dispatcher() {}
+
     template<typename ... ArgT>
     common_dispatcher(ArgT ... args)
         : factory([args...]{ return new ProdT(args...); })
     {
+    }
+
+    template<typename ... ArgT>
+    void set_factory_args(ArgT ... args)
+    {
+        factory = [args...]{ return new ProdT(args...); };
     }
 
     virtual tcp_context * create_connection() noexcept override;
@@ -29,7 +37,7 @@ struct common_dispatcher : dispatcher {
 template<typename ProdT>
 dispatcher::tcp_context * common_dispatcher<ProdT>::create_connection() noexcept
 {
-    return factory();
+    return factory ? factory() : nullptr;
 }
 
 template<typename ProdT>
