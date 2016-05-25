@@ -20,65 +20,6 @@
 
 namespace pruv {
 
-int process_input(const char *s, request_handler handler)
-{
-    static thread_local char buf_in_name[256];
-    static thread_local size_t buf_in_pos;
-    static thread_local size_t buf_in_len;
-    static thread_local char buf_out_name[256];
-    static thread_local size_t buf_out_file_size;
-
-    int parsed = sscanf(s, "HTTP IN SHM %255s %" SCNuPTR ", %" SCNuPTR
-            " OUT SHM %255s %" SCNuPTR, buf_in_name,
-            &buf_in_pos, &buf_in_len, buf_out_name, &buf_out_file_size);
-    if (parsed != 5) {
-        log(LOG_ERR, "Error parsing \"%s\"", s);
-        return EXIT_FAILURE;
-    }
-
-    static shmem_cache buf_in_cache;
-    static shmem_cache buf_out_cache;
-    static const size_t PAGESIZE_MASK = sysconf(_SC_PAGE_SIZE) - 1;
-
-    shmem_buffer *buf_in = buf_in_cache.get(buf_in_name);
-    if (!buf_in)
-        return EXIT_FAILURE;
-    size_t buf_in_base_pos = buf_in_pos & ~PAGESIZE_MASK;
-    size_t in_len = buf_in_pos + buf_in_len - buf_in_base_pos;
-    size_t buf_in_end_pos = buf_in->map_offset() +
-        (buf_in->map_end() - buf_in->map_begin());
-    if (!(buf_in->map_offset() <= buf_in_base_pos &&
-          buf_in_base_pos + in_len <= buf_in_end_pos)) {
-        if (!buf_in->map(buf_in_base_pos, in_len))
-            return EXIT_FAILURE;
-    }
-    buf_in->move_ptr((ptrdiff_t)buf_in_pos - (ptrdiff_t)buf_in->cur_pos());
-
-    shmem_buffer *buf_out = buf_out_cache.get(buf_out_name);
-    if (!buf_out)
-        return EXIT_FAILURE;
-    buf_out->update_file_size(buf_out_file_size);
-
-    int r = EXIT_FAILURE;
-    try {
-        r = handler(buf_in->map_ptr(), buf_in_len, buf_out);
-    }
-    catch (...) {}
-
-    bool ok = true;
-    if (buf_in_pos + buf_in_len > REQUEST_CHUNK)
-        ok &= buf_in->unmap();
-    if (buf_out->map_end() - buf_out->map_begin() > (ptrdiff_t)RESPONSE_CHUNK)
-        ok &= buf_out->unmap();
-    if (!ok)
-        return EXIT_FAILURE;
-
-    printf("RESP %" PRIuPTR " of %" PRIuPTR " END\n",
-            buf_out->data_size(), buf_out->file_size());
-    fflush(stdout);
-    return r;
-}
-
 namespace {
 
 void termhdlr(int sig)
@@ -88,10 +29,8 @@ void termhdlr(int sig)
 
 } // namespace
 
-int worker_loop(request_handler handler)
+int worker_loop::setup()
 {
-    static thread_local char ln[256];
-
     struct sigaction sigact;
     memset(&sigact, 0, sizeof(sigact));
     sigact.sa_handler = termhdlr;
@@ -112,43 +51,130 @@ int worker_loop(request_handler handler)
         log(LOG_ERR, "Orphaned at start. Exit.");
         return EXIT_FAILURE;
     }
+    return EXIT_SUCCESS;
+}
 
+int worker_loop::run()
+{
     for (;;) {
-        char *dst = ln;
-        while (interruption_requested() != IRQ_TERM) {
-            ssize_t r = read(STDIN_FILENO, dst, std::end(ln) - dst);
-            if (r == -1) {
-                if (errno == EINTR)
-                    continue;
-                else {
-                    log_syserr(LOG_ERR, "main read(STDIN_FILENO)");
-                    return EXIT_FAILURE;
-                }
-            }
-            dst += r;
-            char *eol = std::find(dst - r, dst, '\n');
-            if (eol != dst) {
-                *eol = 0;
+        if (!next_request()) {
+            if (interruption_requested())
                 break;
-            }
-            if (dst >= std::end(ln)) {
-                log(LOG_ERR, "Too large input line");
+            else
                 return EXIT_FAILURE;
-            }
         }
-        if (interruption_requested() == IRQ_TERM)
-            break;
 
-        r = process_input(ln, handler);
-        if (r != EXIT_SUCCESS)
+        int r = handle_request();
+        if (interruption_requested())
+            break;
+        else if (r != EXIT_SUCCESS)
             return r;
-        if (interruption_requested() == IRQ_INT) {
-            log(LOG_DEBUG, "Interrupted.");
-            set_interruption(IRQ_NONE);
-        }
+        if (!clean_after_request())
+            return EXIT_FAILURE;
     }
     log(LOG_NOTICE, "Terminated.");
     return EXIT_SUCCESS;
+}
+
+bool worker_loop::read_line() noexcept
+{
+    char *dst = ln;
+    while (!interruption_requested()) {
+        ssize_t r = read(STDIN_FILENO, dst, std::end(ln) - dst);
+        if (r == -1) {
+            if (errno == EINTR)
+                continue;
+            else {
+                log_syserr(LOG_ERR, "worker_loop::read_line "
+                        "read(STDIN_FILENO)");
+                return false;
+            }
+        }
+        dst += r;
+        char *eol = std::find(dst - r, dst, '\n');
+        if (eol != dst) {
+            *eol = 0;
+            return true;
+        }
+        if (dst >= std::end(ln)) {
+            log(LOG_ERR, "Too large input line");
+            return false;
+        }
+    }
+    return false;
+}
+
+bool worker_loop::next_request() noexcept
+{
+    if (!read_line())
+        return false;
+
+    size_t buf_in_pos;
+    size_t buf_in_len;
+    size_t buf_out_file_size;
+    int parsed = sscanf(ln, "%255s IN SHM %255s %" SCNuPTR ", %" SCNuPTR
+            " OUT SHM %255s %" SCNuPTR, req_protocol, buf_in_name,
+            &buf_in_pos, &buf_in_len, buf_out_name, &buf_out_file_size);
+    if (parsed != 6) {
+        log(LOG_ERR, "Error parsing \"%s\"", ln);
+        return false;
+    }
+
+    static const size_t PAGESIZE_MASK = sysconf(_SC_PAGE_SIZE) - 1;
+
+    shmem_buffer *buf_in = buf_in_cache.get(buf_in_name);
+    if (!buf_in)
+        return false;
+    size_t buf_in_base_pos = buf_in_pos & ~PAGESIZE_MASK;
+    size_t in_len = buf_in_pos + buf_in_len - buf_in_base_pos;
+    size_t buf_in_end_pos = buf_in->map_offset() +
+        (buf_in->map_end() - buf_in->map_begin());
+    if (!(buf_in->map_offset() <= buf_in_base_pos &&
+          buf_in_base_pos + in_len <= buf_in_end_pos)) {
+        if (!buf_in->map(buf_in_base_pos, in_len))
+            return false;
+    }
+    buf_in->move_ptr((ptrdiff_t)buf_in_pos - (ptrdiff_t)buf_in->cur_pos());
+
+    shmem_buffer *buf_out = buf_out_cache.get(buf_out_name);
+    if (!buf_out)
+        return false;
+    buf_out->update_file_size(buf_out_file_size);
+
+    request_buf = buf_in;
+    request = buf_in->map_ptr();
+    request_len = buf_in_len;
+    response_buf = buf_out;
+    return true;
+}
+
+bool worker_loop::send_last_response() noexcept
+{
+    bool ok = true;
+    if (response_buf->map_end() - response_buf->map_begin() >
+            (ptrdiff_t)RESPONSE_CHUNK)
+        ok &= response_buf->unmap();
+    if (!ok) {
+        response_buf = nullptr;
+        return false;
+    }
+
+    ok &= printf("RESP %" PRIuPTR " of %" PRIuPTR " END\n",
+            response_buf->data_size(), response_buf->file_size()) >= 0;
+    ok &= fflush(stdout) == 0;
+    response_buf = nullptr;
+    return ok;
+}
+
+bool worker_loop::clean_after_request() noexcept
+{
+    assert(request_buf);
+    bool ok = true;
+    if (request_buf->map_offset() +
+            (request_buf->map_end() - request_buf->map_begin()) > REQUEST_CHUNK)
+        ok &= request_buf->unmap();
+    request_buf = nullptr;
+    return ok;
 }
 
 } // namespace pruv

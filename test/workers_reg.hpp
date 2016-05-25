@@ -2,6 +2,7 @@
  * Copyright (C) Andrey Pikas
  */
 
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -13,11 +14,17 @@ class workers_reg {
 public:
     static workers_reg & instance();
 
-    void add(const char *name, request_handler handler);
-    request_handler get(const char *name) const;
+    void add(const char *name, std::function<worker_loop * ()> factory);
+    std::unique_ptr<worker_loop> get(const char *name) const;
 
+    template<typename T>
     struct registrator {
-        registrator(const char *name, request_handler handler);
+        template<typename ... TArg>
+        registrator(const char *name, TArg ... args)
+        {
+            workers_reg::instance().add(name,
+                    [args...]{ return new T(args...); });
+        }
     };
 
 private:
@@ -27,7 +34,7 @@ private:
     void operator = (const workers_reg &) = delete;
     void operator = (workers_reg &&) = delete;
 
-    std::vector<std::pair<const char *, request_handler>> hdlrs;
+    std::vector<std::pair<const char *, std::function<worker_loop * ()>>> f;
 };
 
 } // namespace pruv

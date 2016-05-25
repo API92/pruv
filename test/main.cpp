@@ -22,9 +22,13 @@ int main(int argc, char **argv) {
 
     pruv::openlog(pruv::log_type::STDERR, -1);
     if (worker) {
-        pruv::request_handler hdlr = pruv::workers_reg::instance().get(worker);
-        if (hdlr)
-            return pruv::worker_loop(hdlr);
+        int r = pruv::worker_loop::setup();
+        if (r)
+            return r;
+        std::unique_ptr<pruv::worker_loop> loop =
+            pruv::workers_reg::instance().get(worker);
+        if (loop)
+            return loop->run();
         else
             return EXIT_FAILURE;
     }

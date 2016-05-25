@@ -18,22 +18,17 @@ workers_reg & workers_reg::instance()
     return inst;
 }
 
-void workers_reg::add(const char *name, request_handler hdlr)
+void workers_reg::add(const char *name, std::function<worker_loop * ()> factory)
 {
-    hdlrs.emplace_back(name, hdlr);
+    f.emplace_back(name, std::move(factory));
 }
 
-request_handler workers_reg::get(const char *name) const
+std::unique_ptr<worker_loop> workers_reg::get(const char *name) const
 {
-    for (const std::pair<const char *, request_handler> &it : hdlrs)
-        if (!strcmp(it.first, name))
-            return it.second;
-    return nullptr;
-}
-
-workers_reg::registrator::registrator(const char *name, request_handler hdlr)
-{
-    workers_reg::instance().add(name, hdlr);
+    for (const auto &it : f)
+        if (!strcmp(it.first, name) && it.second)
+            return std::unique_ptr<worker_loop>(it.second());
+    return std::unique_ptr<worker_loop>();
 }
 
 } // namespace pruv

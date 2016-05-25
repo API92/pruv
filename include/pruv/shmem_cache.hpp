@@ -16,7 +16,7 @@ namespace pruv {
 class shmem_cache {
 public:
     ~shmem_cache();
-    shmem_buffer * get(const char *name);
+    shmem_buffer * get(const char *name) noexcept;
 
 private:
 

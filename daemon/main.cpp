@@ -48,31 +48,35 @@ int parse_int_arg(const char *s, const char *optname)
     return (int)res;
 }
 
-int process_request(char * /*req*/, size_t /*req_len*/,
-        pruv::shmem_buffer *buf_out) noexcept
-{
-    if (pruv::interruption_requested()) {
-        buf_out->set_data_size(0);
-        return EXIT_SUCCESS;
-    }
-    static const std::string resp =
-        u8"HTTP/1.1 200 OK\r\n"
-        u8"Content-Length: 5\r\n"
-        u8"Content-Type: text/html; charset=utf-8\r\n"
-        u8"\r\n"
-        u8"123\r\n"
-    ;
-    buf_out->set_data_size(resp.size());
+class echo_worker : public pruv::worker_loop {
+protected:
+    virtual int handle_request() noexcept override
+    {
+        pruv::shmem_buffer *buf_out = get_response_buf();
+        assert(buf_out);
+        if (pruv::interruption_requested()) {
+            buf_out->set_data_size(0);
+            return EXIT_SUCCESS;
+        }
+        static const std::string resp =
+            u8"HTTP/1.1 200 OK\r\n"
+            u8"Content-Length: 5\r\n"
+            u8"Content-Type: text/html; charset=utf-8\r\n"
+            u8"\r\n"
+            u8"123\r\n"
+        ;
+        buf_out->set_data_size(resp.size());
 
-    if (buf_out->map_offset() ||
-        buf_out->map_end() - buf_out->map_begin() <
-        (ptrdiff_t)buf_out->data_size())
-        if (!buf_out->reset_defaults(buf_out->data_size()))
-            return EXIT_FAILURE;
-    assert(!buf_out->cur_pos());
-    memcpy(buf_out->map_ptr(), resp.c_str(), buf_out->data_size());
-    return EXIT_SUCCESS;
-}
+        if (buf_out->map_offset() ||
+            buf_out->map_end() - buf_out->map_begin() <
+            (ptrdiff_t)buf_out->data_size())
+            if (!buf_out->reset_defaults(buf_out->data_size()))
+                return EXIT_FAILURE;
+        assert(!buf_out->cur_pos());
+        memcpy(buf_out->map_ptr(), resp.c_str(), buf_out->data_size());
+        return send_last_response() ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+};
 
 int main(int argc, char * const *argv)
 {
@@ -121,8 +125,17 @@ int main(int argc, char * const *argv)
         (daemon_or_worker ? pruv::log_type::JOURNALD : pruv::log_type::STDERR),
         log_level);
 
-    if (daemon_or_worker == 2)
-        return pruv::worker_loop(process_request);
+    if (daemon_or_worker == 2) {
+        int r = pruv::worker_loop::setup();
+        if (r)
+            return r;
+        std::unique_ptr<echo_worker> loop(new (std::nothrow) echo_worker);
+        if (!loop) {
+            pruv::log(LOG_ERR, "No memory for worker loop object.");
+            return EXIT_FAILURE;
+        }
+        return loop->run();
+    }
 
     if (worker_exe == argv[0]) {
         worker_args.push_back("--worker");

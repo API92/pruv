@@ -109,23 +109,26 @@ bool test_context::finish_response() noexcept
     return false; // close connection
 }
 
-int onerequest_worker(char *req, size_t req_len, shmem_buffer *resp)
-{
-    if (req_len != 2 * sizeof(size_t))
-        return EXIT_FAILURE;
-    size_t *p = reinterpret_cast<size_t *>(req);
-    if (p[0] != sizeof(p[1]))
-        return EXIT_FAILURE;
-    size_t resp_len = p[1];
-    if (!resp->reset_defaults(resp_len))
-        return EXIT_FAILURE;
-    resp->set_data_size(resp_len);
-    for (size_t i = 0; i < resp_len; ++i)
-        resp->map_ptr()[i] = i;
-    return 0;
-}
+struct onerequest_worker : public worker_loop {
+    virtual int handle_request() noexcept override
+    {
+        if (get_request_len() != 2 * sizeof(size_t))
+            return EXIT_FAILURE;
+        size_t *p = reinterpret_cast<size_t *>(get_request());
+        if (p[0] != sizeof(p[1]))
+            return EXIT_FAILURE;
+        size_t resp_len = p[1];
+        shmem_buffer *resp = get_response_buf();
+        if (!resp->reset_defaults(resp_len))
+            return EXIT_FAILURE;
+        resp->set_data_size(resp_len);
+        for (size_t i = 0; i < resp_len; ++i)
+            resp->map_ptr()[i] = i;
+        return send_last_response() ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+};
 
-workers_reg::registrator reg("onerequest", onerequest_worker);
+workers_reg::registrator<onerequest_worker> reg("onerequest");
 
 struct context {
     uv_loop_t *loop;
