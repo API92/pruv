@@ -5,6 +5,7 @@
 #pragma once
 
 #include <functional>
+#include <set>
 
 #include <pruv/dispatcher.hpp>
 
@@ -31,18 +32,24 @@ struct common_dispatcher : dispatcher {
     virtual tcp_context * create_connection() noexcept override;
     virtual void free_connection(tcp_context *con) noexcept override;
 
-    std::function<tcp_context * ()> factory;
+    std::function<ProdT * ()> factory;
+
+    std::set<ProdT *> products;
 };
 
 template<typename ProdT>
 dispatcher::tcp_context * common_dispatcher<ProdT>::create_connection() noexcept
 {
-    return factory ? factory() : nullptr;
+    ProdT *result = factory ? factory() : nullptr;
+    if (result)
+        products.insert(result);
+    return result;
 }
 
 template<typename ProdT>
 void common_dispatcher<ProdT>::free_connection(tcp_context *con) noexcept
 {
+    products.erase(dynamic_cast<ProdT *>(con));
     delete con;
 }
 
