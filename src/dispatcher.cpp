@@ -894,15 +894,8 @@ void dispatcher::tcp_context::remove_from_dispatcher() noexcept
         get_dispatcher()->return_buffer(&resp_buffers.front(), false);
     resp_buffers_num = 0;
 
-    if (worker) {
+    if (worker)
         worker->processed_con = nullptr;
-        if (!worker->exited) {
-            int r = uv_process_kill(worker, SIGINT);
-            if (r < 0)
-                log_uv_err(LOG_ERR, "dispatcher::tcp_context::"
-                        "remove_from_dispatcher uv_process_kill", r);
-        }
-    }
     else if (read_buffer)
         get_dispatcher()->return_buffer(read_buffer, true);
     read_buffer = nullptr;
