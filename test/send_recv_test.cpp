@@ -23,8 +23,7 @@ struct test_context : common_dispatcher<test_context>::tcp_context {
     bool req_end = false;
     bool keep_alive = true;
 
-    test_context(size_t exp_req_len, size_t exp_resp_len)
-        : exp_req_len(exp_req_len), exp_resp_len(exp_resp_len) {}
+    test_context() : exp_req_len(0), exp_resp_len(0) {}
 
     virtual bool prepare_for_request(shmem_buffer *buf) noexcept override;
     virtual bool validate_request(const shmem_buffer *buf) const noexcept
@@ -63,7 +62,7 @@ bool test_context::parse_request(shmem_buffer *buf) noexcept
     EXPECT_GE(exp_req_len, buf->data_size());
     req_end = (buf->data_size() == exp_req_len);
     if (req_end)
-        keep_alive = reinterpret_cast<const size_t *>(buf->map_begin())[2];
+        keep_alive = reinterpret_cast<const size_t *>(buf->map_begin())[1];
     return true;
 }
 
@@ -115,39 +114,22 @@ bool test_context::finish_response() noexcept
     return keep_alive;
 }
 
-struct onerequest_worker : public worker_loop {
-    virtual int handle_request() noexcept override
-    {
-        if (get_request_len() != 3 * sizeof(size_t))
-            return EXIT_FAILURE;
-        size_t *p = reinterpret_cast<size_t *>(get_request());
-        if (p[0] != 2 * sizeof(p[1]))
-            return EXIT_FAILURE;
-        size_t resp_len = p[1];
-        shmem_buffer *resp = get_response_buf();
-        if (!resp->reset_defaults(resp_len))
-            return EXIT_FAILURE;
-        resp->set_data_size(resp_len);
-        for (size_t i = 0; i < resp_len; ++i)
-            resp->map_ptr()[i] = i;
-        return send_last_response() ? EXIT_SUCCESS : EXIT_FAILURE;
-    }
-};
-
-workers_reg::registrator<onerequest_worker> reg("onerequest");
-
 struct context {
     uv_loop_t *loop;
     std::unique_ptr<uv_tcp_t> con;
-    int last;
+    context *next;
     int keep_alive;
     std::unique_ptr<uv_connect_t> rcon;
     uv_write_t write;
-    size_t req_data[3];
+    std::vector<char> req_data;
     std::vector<char> resp_data;
     size_t resp_len;
     size_t exp_resp_len;
     common_dispatcher<test_context> *d;
+
+    virtual ~context() {}
+    virtual void create_request() = 0;
+    virtual void check_response() const = 0;
 };
 
 void connect(context *ctx);
@@ -169,10 +151,10 @@ void on_read(uv_stream_t *strm, ssize_t nread, const uv_buf_t *)
         else {
             EXPECT_EQ(UV_EOF, nread);
             uv_close((uv_handle_t *)strm, nullptr);
-            if (ctx->last)
-                ctx->d->stop();
+            if (ctx->next)
+                connect(ctx->next);
             else
-                connect(ctx + 1);
+                ctx->d->stop();
         }
     }
     else {
@@ -180,12 +162,10 @@ void on_read(uv_stream_t *strm, ssize_t nread, const uv_buf_t *)
         ctx->resp_len += nread;
         EXPECT_GE(ctx->exp_resp_len, ctx->resp_len);
         if (ctx->resp_len == ctx->exp_resp_len) {
-            for (size_t i = 0; i < ctx->resp_len; ++i)
-                EXPECT_EQ((char)i, ctx->resp_data[i]);
+            ctx->check_response();
             if (ctx->keep_alive) {
-                context *n = ctx + 1;
-                (*n->d->products.begin())->exp_req_len = 3 * sizeof(size_t);
-                (*n->d->products.begin())->exp_resp_len = n->exp_resp_len;
+                context *n = ctx->next;
+                assert(n);
                 n->con = std::move(ctx->con);
                 n->con->data = n;
                 n->rcon = std::move(ctx->rcon);
@@ -208,18 +188,18 @@ void on_connect(uv_connect_t *req_con, int status)
 {
     ASSERT_TRUE(uv_ok(status));
     context *ctx = reinterpret_cast<context *>(req_con->data);
-    ctx->req_data[0] = 2 * sizeof(ctx->req_data[1]);
-    ctx->req_data[1] = ctx->exp_resp_len;
-    ctx->req_data[2] = ctx->keep_alive;
-    uv_buf_t buf = uv_buf_init((char *)&ctx->req_data, sizeof(ctx->req_data));
+    ctx->create_request();
+    uv_buf_t buf = uv_buf_init(&ctx->req_data.front(), ctx->req_data.size());
     ctx->write.data = ctx;
+    (*ctx->d->products.begin())->exp_req_len = ctx->req_data.size();
+    (*ctx->d->products.begin())->exp_resp_len = ctx->exp_resp_len;
     ASSERT_TRUE(uv_ok(uv_write(&ctx->write, ctx->rcon->handle, &buf, 1,
                     on_write)));
 }
 
 void connect(context *ctx)
 {
-    ctx->d->set_factory_args(3 * sizeof(size_t), ctx->exp_resp_len);
+    ctx->d->set_factory_args();
     ctx->con.reset(new uv_tcp_t);
     ctx->con->data = ctx;
     ASSERT_TRUE(uv_ok(uv_tcp_init(ctx->loop, ctx->con.get())));
@@ -233,6 +213,47 @@ void connect(context *ctx)
 
 } // namespace
 
+struct onerequest_worker : public worker_loop {
+    virtual int handle_request() noexcept override
+    {
+        if (get_request_len() != 3 * sizeof(size_t))
+            return EXIT_FAILURE;
+        size_t *p = reinterpret_cast<size_t *>(get_request());
+        if (p[0] != 2 * sizeof(p[1]))
+            return EXIT_FAILURE;
+        size_t resp_len = p[2];
+        shmem_buffer *resp = get_response_buf();
+        if (!resp->reset_defaults(resp_len))
+            return EXIT_FAILURE;
+        resp->set_data_size(resp_len);
+        for (size_t i = 0; i < resp_len; ++i)
+            resp->map_ptr()[i] = i;
+        return send_last_response() ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+};
+
+workers_reg::registrator<onerequest_worker> reg1("onerequest");
+
+struct empty_req_context : context {
+    virtual void create_request() override
+    {
+        req_data.resize(3 * sizeof(size_t));
+        size_t *dst = (size_t *)req_data.data();
+        dst[0] = 2 * sizeof(dst[1]);
+        dst[1] = keep_alive;
+        dst[2] = exp_resp_len;
+    }
+
+    virtual void check_response() const override
+    {
+        for (size_t i = 0; i < resp_len; ++i)
+            EXPECT_EQ((char)i, resp_data[i]);
+    }
+};
+
+template<typename T, size_t n>
+constexpr size_t ar_sz(const T (&)[n]) { return n; }
+
 struct nonpersistent : loop_fixture {};
 
 TEST_F(nonpersistent, varresponses)
@@ -242,15 +263,18 @@ TEST_F(nonpersistent, varresponses)
     d.start(&loop, "::1", 8000, 1, "./pruv_test", args);
     size_t lens[] = {0, 1, 4096, REQUEST_CHUNK, RESPONSE_CHUNK,
         10 * RESPONSE_CHUNK, 123, 10 * RESPONSE_CHUNK + 123};
-    std::vector<context> ctxs(std::distance(lens, std::end(lens)));
+    std::vector<std::unique_ptr<context>> ctxs(ar_sz(lens));
     for (size_t i = 0; i < ctxs.size(); ++i) {
-        ctxs[i].last = (i + 1 == ctxs.size());
-        ctxs[i].keep_alive = false;
-        ctxs[i].exp_resp_len = lens[i];
-        ctxs[i].d = &d;
-        ctxs[i].loop = &loop;
+        ctxs[i].reset(new empty_req_context);
+        ctxs[i]->next = nullptr;
+        if (i)
+            ctxs[i - 1]->next = ctxs[i].get();
+        ctxs[i]->keep_alive = false;
+        ctxs[i]->exp_resp_len = lens[i];
+        ctxs[i]->d = &d;
+        ctxs[i]->loop = &loop;
     }
-    connect(ctxs.data());
+    connect(ctxs.front().get());
     ASSERT_TRUE(uv_ok(uv_run(&loop, UV_RUN_DEFAULT)));
     d.on_loop_exit();
 }
@@ -264,16 +288,100 @@ TEST_F(persistent, varresponses)
     d.start(&loop, "::1", 8000, 1, "./pruv_test", args);
     size_t lens[] = {1, 4096, REQUEST_CHUNK, RESPONSE_CHUNK,
         10 * RESPONSE_CHUNK, 123, 10 * RESPONSE_CHUNK + 123};
-    std::vector<context> ctxs(std::distance(lens, std::end(lens)));
+    std::vector<std::unique_ptr<context>> ctxs(ar_sz(lens));
     for (size_t i = 0; i < ctxs.size(); ++i) {
-        ctxs[i].last = (i + 1 == ctxs.size());
-        ctxs[i].keep_alive = true;
-        ctxs[i].exp_resp_len = lens[i];
-        ctxs[i].d = &d;
-        ctxs[i].loop = &loop;
+        ctxs[i].reset(new empty_req_context());
+        ctxs[i]->next = nullptr;
+        if (i)
+            ctxs[i - 1]->next = ctxs[i].get();
+        ctxs[i]->keep_alive = true;
+        ctxs[i]->exp_resp_len = lens[i];
+        ctxs[i]->d = &d;
+        ctxs[i]->loop = &loop;
     }
-    ctxs.back().keep_alive = false;
-    connect(ctxs.data());
+    ctxs.back()->keep_alive = false;
+    connect(ctxs.front().get());
+    ASSERT_TRUE(uv_ok(uv_run(&loop, UV_RUN_DEFAULT)));
+    d.on_loop_exit();
+}
+
+uint32_t adler32(unsigned char *data, size_t len)
+{
+    const int MOD_ADLER = 65521;
+    uint32_t a = 1, b = 0;
+    for (size_t i = 0; i < len; ++i) {
+        a = (a + data[i]) % MOD_ADLER;
+        b = (b + a) % MOD_ADLER;
+    }
+    return (b << 16) | a;
+}
+
+struct hashrequest_worker : public worker_loop {
+    virtual int handle_request() noexcept override
+    {
+        if (get_request_len() < 2 * sizeof(size_t))
+            return EXIT_FAILURE;
+        size_t *p = reinterpret_cast<size_t *>(get_request());
+        if (p[0] + sizeof(p[0]) != get_request_len())
+            return EXIT_FAILURE;
+        size_t resp_len = 4;
+        shmem_buffer *resp = get_response_buf();
+        if (!resp->reset_defaults(resp_len))
+            return EXIT_FAILURE;
+        resp->set_data_size(resp_len);
+        unsigned char *body = (unsigned char *)get_request() +
+            2 * sizeof(size_t);
+        *reinterpret_cast<uint32_t *>(resp->map_ptr()) = adler32(body, p[0]);
+        return send_last_response() ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+};
+
+workers_reg::registrator<onerequest_worker> reg2("hashrequest");
+
+struct hash_req_context : context {
+    size_t gen_req_len;
+    uint32_t hash;
+
+    virtual void create_request() override
+    {
+        req_data.resize(2 * sizeof(size_t) + gen_req_len);
+        size_t *hdr = (size_t *)req_data.data();
+        hdr[0] = gen_req_len;
+        hdr[1] = keep_alive;
+        char *body = req_data.data() + 2 * sizeof(size_t);
+        for (size_t i = 0; i < gen_req_len; ++i)
+            body[i] = 0;
+        hash = adler32((unsigned char *)body, gen_req_len);
+    }
+
+    virtual void check_response() const override
+    {
+        EXPECT_EQ(hash, *reinterpret_cast<const uint32_t *>(resp_data.data()));
+    }
+};
+
+TEST_F(nonpersistent, varrequests)
+{
+    common_dispatcher<test_context> d;
+    const char *args[] = {"./pruv_test", "--worker", "hashrequest", nullptr};
+    d.start(&loop, "::1", 8000, 1, "./pruv_test", args);
+    size_t hdr = 2 * sizeof(size_t);
+    size_t lens[] = {0, 1, 4096 - hdr, REQUEST_CHUNK - hdr, REQUEST_CHUNK,
+        RESPONSE_CHUNK - hdr, RESPONSE_CHUNK,
+        10 * RESPONSE_CHUNK - hdr, 123, 10 * RESPONSE_CHUNK + 123};
+    std::vector<std::unique_ptr<hash_req_context>> ctxs(ar_sz(lens));
+    for (size_t i = 0; i < ctxs.size(); ++i) {
+        ctxs[i].reset(new hash_req_context());
+        ctxs[i]->next = nullptr;
+        if (i)
+            ctxs[i - 1]->next = ctxs[i].get();
+        ctxs[i]->keep_alive = false;
+        ctxs[i]->gen_req_len = lens[i];
+        ctxs[i]->resp_len = 4;
+        ctxs[i]->d = &d;
+        ctxs[i]->loop = &loop;
+    }
+    connect(ctxs.front().get());
     ASSERT_TRUE(uv_ok(uv_run(&loop, UV_RUN_DEFAULT)));
     d.on_loop_exit();
 }
