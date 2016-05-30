@@ -89,19 +89,19 @@ int main(int argc, char * const *argv)
     int workers_num = 1;
     const char *worker_exe = argv[0];
     std::vector<const char *> worker_args;
-    for (;;) {
-        static const option opts[] = {
-            {"daemon", no_argument, &daemon_or_worker, 1},
-            {"worker", no_argument, &daemon_or_worker, 2},
-            {"loglevel", required_argument, &log_level, LOG_INFO},
-            {"listen-addr", required_argument, nullptr, 1},
-            {"listen-port", required_argument, &listen_port, 8000},
-            {"workers-num", required_argument, &workers_num, 1},
-            {"worker-executable", required_argument, nullptr, 2},
-            {"worker-arg", required_argument, nullptr, 3},
-            {0, 0, nullptr, 0}
-        };
+    const option opts[] = {
+        {"daemon", no_argument, &daemon_or_worker, 1},
+        {"worker", no_argument, &daemon_or_worker, 2},
+        {"loglevel", required_argument, &log_level, LOG_INFO},
+        {"listen-addr", required_argument, nullptr, 1},
+        {"listen-port", required_argument, &listen_port, 8000},
+        {"workers-num", required_argument, &workers_num, 1},
+        {"worker-executable", required_argument, nullptr, 2},
+        {"worker-arg", required_argument, nullptr, 3},
+        {0, 0, nullptr, 0}
+    };
 
+    for (;;) {
         int opt_idx = 0;
         int c = getopt_long(argc, argv, "", opts, &opt_idx);
         if (c == -1)
