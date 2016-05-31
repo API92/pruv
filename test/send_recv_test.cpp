@@ -61,7 +61,7 @@ bool test_context::parse_request(shmem_buffer *buf) noexcept
 {
     EXPECT_GE(exp_req_len, buf->data_size());
     req_end = (buf->data_size() == exp_req_len);
-    if (req_end)
+    if (!buf->map_offset() && buf->data_size() >= 2 * sizeof(size_t))
         keep_alive = reinterpret_cast<const size_t *>(buf->map_begin())[1];
     return true;
 }
@@ -322,7 +322,7 @@ struct hashrequest_worker : public worker_loop {
         if (get_request_len() < 2 * sizeof(size_t))
             return EXIT_FAILURE;
         size_t *p = reinterpret_cast<size_t *>(get_request());
-        if (p[0] + sizeof(p[0]) != get_request_len())
+        if (p[0] + 2 * sizeof(size_t) != get_request_len())
             return EXIT_FAILURE;
         size_t resp_len = 4;
         shmem_buffer *resp = get_response_buf();
@@ -336,7 +336,7 @@ struct hashrequest_worker : public worker_loop {
     }
 };
 
-workers_reg::registrator<onerequest_worker> reg2("hashrequest");
+workers_reg::registrator<hashrequest_worker> reg2("hashrequest");
 
 struct hash_req_context : context {
     size_t gen_req_len;
@@ -377,10 +377,37 @@ TEST_F(nonpersistent, varrequests)
             ctxs[i - 1]->next = ctxs[i].get();
         ctxs[i]->keep_alive = false;
         ctxs[i]->gen_req_len = lens[i];
-        ctxs[i]->resp_len = 4;
+        ctxs[i]->exp_resp_len = 4;
         ctxs[i]->d = &d;
         ctxs[i]->loop = &loop;
     }
+    connect(ctxs.front().get());
+    ASSERT_TRUE(uv_ok(uv_run(&loop, UV_RUN_DEFAULT)));
+    d.on_loop_exit();
+}
+
+TEST_F(persistent, varrequests)
+{
+    common_dispatcher<test_context> d;
+    const char *args[] = {"./pruv_test", "--worker", "hashrequest", nullptr};
+    d.start(&loop, "::1", 8000, 1, "./pruv_test", args);
+    size_t hdr = 2 * sizeof(size_t);
+    size_t lens[] = {0, 1, 4096 - hdr, REQUEST_CHUNK - hdr, REQUEST_CHUNK,
+        RESPONSE_CHUNK - hdr, RESPONSE_CHUNK,
+        10 * RESPONSE_CHUNK - hdr, 123, 10 * RESPONSE_CHUNK + 123};
+    std::vector<std::unique_ptr<hash_req_context>> ctxs(ar_sz(lens));
+    for (size_t i = 0; i < ctxs.size(); ++i) {
+        ctxs[i].reset(new hash_req_context());
+        ctxs[i]->next = nullptr;
+        if (i)
+            ctxs[i - 1]->next = ctxs[i].get();
+        ctxs[i]->keep_alive = true;
+        ctxs[i]->gen_req_len = lens[i];
+        ctxs[i]->exp_resp_len = 4;
+        ctxs[i]->d = &d;
+        ctxs[i]->loop = &loop;
+    }
+    ctxs.back()->keep_alive = false;
     connect(ctxs.front().get());
     ASSERT_TRUE(uv_ok(uv_run(&loop, UV_RUN_DEFAULT)));
     d.on_loop_exit();

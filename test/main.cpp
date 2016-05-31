@@ -16,11 +16,12 @@ int main(int argc, char **argv) {
         {"worker", required_argument, nullptr, 1},
         {0, 0, nullptr, 0}
     };
+    opterr = 0;
     for (int c; (c = getopt_long(argc, argv, "", opts, nullptr)) != -1;)
         if (c == 1)
             worker = optarg;
 
-    pruv::openlog(pruv::log_type::STDERR, -1);
+    pruv::openlog(pruv::log_type::JOURNALD, -1);
     if (worker) {
         int r = pruv::worker_loop::setup();
         if (r)
