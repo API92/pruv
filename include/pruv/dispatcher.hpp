@@ -66,7 +66,8 @@ protected:
         /// can be done else returns false.
         /// If called with not null buf then makes response in buf and if
         /// returns false then connection will be closed.
-        virtual bool inplace_response(shmem_buffer *buf) noexcept = 0;
+        virtual bool inplace_response(shmem_buffer *buf_in,
+                shmem_buffer *buf_out) noexcept = 0;
         /// Called before starting new response message, received from worker.
         /// If returns false, connection will be closed.
         virtual bool prepare_for_response() noexcept = 0;

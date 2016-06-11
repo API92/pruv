@@ -30,7 +30,8 @@ struct test_context : common_dispatcher<test_context>::tcp_context {
     virtual size_t request_size() const noexcept override;
     virtual size_t request_pos() const noexcept override;
     virtual const char * request_protocol() const noexcept override;
-    virtual bool inplace_response(shmem_buffer *buf) noexcept override;
+    virtual bool inplace_response(shmem_buffer *buf_in,
+            shmem_buffer *buf_out) noexcept override;
     virtual bool prepare_for_response() noexcept override;
     virtual bool parse_response(shmem_buffer *buf) noexcept override;
     virtual bool finish_response() noexcept override;
@@ -80,9 +81,11 @@ const char * test_context::request_protocol() const noexcept
     return "HTTP";
 }
 
-bool test_context::inplace_response(shmem_buffer *buf) noexcept
+bool test_context::inplace_response(shmem_buffer *buf_in, shmem_buffer *buf_out)
+    noexcept
 {
-    EXPECT_EQ(nullptr, buf);
+    EXPECT_EQ(nullptr, buf_in);
+    EXPECT_EQ(nullptr, buf_out);
     EXPECT_TRUE(req_end);
     return false;
 }

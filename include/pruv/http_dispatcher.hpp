@@ -20,7 +20,8 @@ protected:
         virtual size_t request_size() const noexcept override;
         virtual size_t request_pos() const noexcept override;
         virtual const char * request_protocol() const noexcept override;
-        virtual bool inplace_response(shmem_buffer *buf) noexcept override;
+        virtual bool inplace_response(shmem_buffer *buf_in,
+                shmem_buffer *buf_out) noexcept override;
         virtual bool prepare_for_response() noexcept override;
         virtual bool parse_response(shmem_buffer *buf) noexcept override;
         virtual bool finish_response() noexcept override;

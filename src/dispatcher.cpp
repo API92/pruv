@@ -369,7 +369,7 @@ void dispatcher::respond_or_enqueue(tcp_context *con) noexcept
         // It will be done after sending all responses.
         return move_to(tcp_context::LIST_WRITING, con);
 
-    if (!con->inplace_response(nullptr))
+    if (!con->inplace_response(nullptr, nullptr))
         return move_to(tcp_context::LIST_SCHEDULING, con);
 
     shmem_buffer_node *buf = get_buffer(false);
@@ -380,7 +380,7 @@ void dispatcher::respond_or_enqueue(tcp_context *con) noexcept
     con->resp_buffers.push_back(buf);
     ++con->resp_buffers_num;
     move_to(tcp_context::LIST_WRITING, con);
-    if (!con->inplace_response(buf))
+    if (!con->inplace_response(con->read_buffer, buf))
         return con->remove_from_dispatcher();
 
     if (!con->reading_in_buf && con->request_pos() + con->request_size() >=
@@ -401,7 +401,7 @@ void dispatcher::schedule() noexcept
 {
     assert(loop);
     while (!clients_scheduling.empty() &&
-           clients_scheduling.front().inplace_response(nullptr)) {
+           clients_scheduling.front().inplace_response(nullptr, nullptr)) {
         tcp_context *con = &clients_scheduling.front();
         respond_or_enqueue(con);
         assert(con->empty() || con->list_id == tcp_context::LIST_WRITING);

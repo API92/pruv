@@ -93,10 +93,11 @@ const char * http_dispatcher::tcp_http_context::request_protocol() const
     return "HTTP";
 }
 
-bool http_dispatcher::tcp_http_context::inplace_response(shmem_buffer *buf)
-    noexcept
+bool http_dispatcher::tcp_http_context::inplace_response(shmem_buffer *buf_in,
+        shmem_buffer *buf_out) noexcept
 {
-    assert(!buf);
+    assert(!buf_in);
+    assert(!buf_out);
     return false;
 }
 

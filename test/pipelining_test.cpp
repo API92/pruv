@@ -15,8 +15,42 @@
 #include "workers_reg.hpp"
 
 namespace pruv {
+namespace {
+
+bool generate_response(char *request, size_t req_len, shmem_buffer *resp)
+{
+    if (req_len < sizeof(size_t) + 1) {
+        log(LOG_ERR, "Request is too small");
+        return false;
+    }
+    size_t body_len = *reinterpret_cast<size_t *>(request);
+    if (sizeof(size_t) + 1 + body_len != req_len) {
+        log(LOG_ERR, "Request length %" PRIuPTR " is wrong", req_len);
+        return false;
+    }
+    bool keep_alive = request[sizeof(size_t)];
+    size_t resp_body_len = 2 * body_len;
+    size_t resp_len = sizeof(size_t) + 1 + resp_body_len;
+    if (!resp->reset_defaults(resp_len))
+        return false;
+    resp->set_data_size(resp_len);
+    memcpy(resp->map_ptr(), &resp_body_len, sizeof(resp_body_len));
+    resp->move_ptr(sizeof(resp_body_len));
+    *resp->map_ptr() = keep_alive;
+    resp->move_ptr(1);
+
+    char *cp = request + sizeof(size_t) + 1;
+    for (size_t i = 0; i < body_len; ++i, ++cp) {
+        *resp->map_ptr() = *std::prev(resp->map_ptr()) ^ *cp;
+        *std::next(resp->map_ptr()) = *cp;
+        resp->move_ptr(2);
+    }
+    return true;
+}
 
 struct pipeline_context : common_dispatcher<pipeline_context>::tcp_context {
+    pipeline_context(bool inplace) : inplace(inplace) {}
+
     virtual bool prepare_for_request(shmem_buffer *buf) noexcept override;
     virtual bool validate_request(const shmem_buffer *buf) const noexcept
         override;
@@ -24,7 +58,8 @@ struct pipeline_context : common_dispatcher<pipeline_context>::tcp_context {
     virtual size_t request_size() const noexcept override;
     virtual size_t request_pos() const noexcept override;
     virtual const char * request_protocol() const noexcept override;
-    virtual bool inplace_response(shmem_buffer *buf) noexcept override;
+    virtual bool inplace_response(shmem_buffer *buf_in,
+            shmem_buffer *buf_out) noexcept override;
     virtual bool prepare_for_response() noexcept override;
     virtual bool parse_response(shmem_buffer *buf) noexcept override;
     virtual bool finish_response() noexcept override;
@@ -33,6 +68,7 @@ struct pipeline_context : common_dispatcher<pipeline_context>::tcp_context {
     size_t request_len = 0;
     size_t body_len = 0;
 
+    bool inplace;
     bool req_end = true;
     bool keep_alive;
 };
@@ -92,10 +128,33 @@ const char * pipeline_context::request_protocol() const noexcept
     return "TEST";
 }
 
-bool pipeline_context::inplace_response(shmem_buffer *buf) noexcept
+bool pipeline_context::inplace_response(shmem_buffer *buf_in,
+        shmem_buffer *buf_out) noexcept
 {
-    assert(!buf);
-    return buf;
+    EXPECT_TRUE(req_end);
+
+    if (inplace) {
+        if (!buf_out)
+            return true;
+        bool map_res = buf_in->map(0, request_pos_ + request_len);
+        EXPECT_TRUE(map_res);
+        if (!map_res)
+            return false;
+        bool gen_res = generate_response(buf_in->map_ptr() + request_pos_,
+                request_len, buf_out);
+        EXPECT_TRUE(gen_res);
+        if (!gen_res)
+            return false;
+        bool move_res = buf_out->seek(0, RESPONSE_CHUNK);
+        EXPECT_TRUE(move_res);
+        if (!move_res)
+            return false;
+        return true;
+    }
+    else {
+        EXPECT_TRUE(!buf_out);
+        return buf_out;
+    }
 }
 
 bool pipeline_context::prepare_for_response() noexcept
@@ -168,7 +227,7 @@ struct state {
     common_dispatcher<pipeline_context> *d = nullptr;
 };
 
-struct pipeline : loop_fixture {
+struct pipeline : loop_fixture, ::testing::WithParamInterface<bool> {
     static void on_write(uv_write_t *, int status)
     {
         ASSERT_TRUE(uv_ok(status));
@@ -226,44 +285,16 @@ struct pipeline : loop_fixture {
 struct redundant_worker : public worker_loop {
     virtual int handle_request() noexcept override
     {
-        if (get_request_len() < sizeof(size_t) + 1) {
-            log(LOG_ERR, "Request is too small");
+        if (!generate_response(get_request(), get_request_len(),
+                    get_response_buf()))
             return EXIT_FAILURE;
-        }
-        size_t body_len = *reinterpret_cast<size_t *>(get_request());
-        if (sizeof(size_t) + 1 + body_len != get_request_len()) {
-            log(LOG_ERR, "Request length %" PRIuPTR " is wrong",
-                    get_request_len());
-            return EXIT_FAILURE;
-        }
-        bool keep_alive = get_request()[sizeof(size_t)];
-        size_t resp_body_len = 2 * body_len;
-        size_t resp_len = sizeof(size_t) + 1 + resp_body_len;
-        shmem_buffer *resp = get_response_buf();
-        if (!resp->reset_defaults(resp_len))
-            return EXIT_FAILURE;
-        resp->set_data_size(resp_len);
-        memcpy(resp->map_ptr(), &resp_body_len, sizeof(resp_body_len));
-        resp->move_ptr(sizeof(resp_body_len));
-        *resp->map_ptr() = keep_alive;
-        resp->move_ptr(1);
-
-        char *cp = get_request() + sizeof(size_t) + 1;
-        for (size_t i = 0; i < body_len; ++i, ++cp) {
-            *resp->map_ptr() = *std::prev(resp->map_ptr()) ^ *cp;
-            *std::next(resp->map_ptr()) = *cp;
-            resp->move_ptr(2);
-        }
-
         return send_last_response() ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 };
 
-namespace {
 workers_reg::registrator<redundant_worker> reg("redundantxor");
-} // namespace
 
-TEST_F(pipeline, test_1)
+TEST_P(pipeline, test_1)
 {
     size_t lens[] = {9, 10, REQUEST_CHUNK - 1, REQUEST_CHUNK,
         REQUEST_CHUNK + 1, REQUEST_CHUNK + 9, 10 * REQUEST_CHUNK};
@@ -283,7 +314,7 @@ TEST_F(pipeline, test_1)
 
     ASSERT_TRUE(uv_ok(uv_tcp_init(&loop, &st.connection)));
 
-    common_dispatcher<pipeline_context> d;
+    common_dispatcher<pipeline_context> d(GetParam());
     st.d = &d;
     const char *args[] = {"./pruv_test", "--worker", "redundantxor", nullptr};
     d.start(&loop, "::1", 8000, 1, "./pruv_test", args);
@@ -302,4 +333,9 @@ TEST_F(pipeline, test_1)
             st.recv_buffer.begin(), st.recv_buffer.end()));
 }
 
+INSTANTIATE_TEST_CASE_P(inworker, pipeline, ::testing::Values(false));
+
+INSTANTIATE_TEST_CASE_P(inplace, pipeline, ::testing::Values(true));
+
+} // namespace
 } // namespace pruv

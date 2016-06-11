@@ -104,10 +104,11 @@ http_pipelining_dispatcher::http_pipelining_context::request_protocol() const
 }
 
 bool http_pipelining_dispatcher::http_pipelining_context::inplace_response(
-        shmem_buffer *buf) noexcept
+        shmem_buffer *buf_in, shmem_buffer *buf_out) noexcept
 {
-    assert(!buf);
-    return buf;
+    assert(!buf_in);
+    assert(!buf_out);
+    return buf_out;
 }
 
 bool http_pipelining_dispatcher::http_pipelining_context::prepare_for_response()
