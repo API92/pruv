@@ -16,14 +16,12 @@ namespace pruv {
 namespace {
 
 struct test_context : common_dispatcher<test_context>::tcp_context {
-    size_t exp_req_len;
-    size_t exp_resp_len;
+    size_t exp_req_len = 0;
+    size_t exp_resp_len = 0;
     size_t resp_len = 0;
     int cnt = 0;
     bool req_end = false;
     bool keep_alive = true;
-
-    test_context() : exp_req_len(0), exp_resp_len(0) {}
 
     virtual bool prepare_for_request(shmem_buffer *buf) noexcept override;
     virtual bool validate_request(const shmem_buffer *buf) const noexcept
@@ -232,7 +230,9 @@ struct onerequest_worker : public worker_loop {
     }
 };
 
+namespace {
 workers_reg::registrator<onerequest_worker> reg1("onerequest");
+} // namespace
 
 struct empty_req_context : context {
     virtual void create_request() override
@@ -336,7 +336,9 @@ struct hashrequest_worker : public worker_loop {
     }
 };
 
+namespace {
 workers_reg::registrator<hashrequest_worker> reg2("hashrequest");
+} // namespace
 
 struct hash_req_context : context {
     size_t gen_req_len;

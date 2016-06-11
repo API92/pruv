@@ -15,8 +15,6 @@ template<typename ProdT>
 struct common_dispatcher : dispatcher {
     using dispatcher::tcp_context;
 
-    common_dispatcher() {}
-
     template<typename ... ArgT>
     common_dispatcher(ArgT ... args)
         : factory([args...]{ return new ProdT(args...); })

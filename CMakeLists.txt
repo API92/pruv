@@ -47,11 +47,12 @@ add_executable(${PROJECT_NAME}d
 )
 
 add_executable(${PROJECT_NAME}_test
+    test/common_dispatcher.hpp
     test/fixtures.cpp
     test/fixtures.hpp
     test/main.cpp
     test/send_recv_test.cpp
-    test/common_dispatcher.hpp
+    test/pipelining_test.cpp
     test/workers_reg.cpp
     test/workers_reg.hpp
 )

@@ -84,8 +84,8 @@ bool http_pipelining_dispatcher::http_pipelining_context::parse_request(
     return true;
 }
 
-size_t http_pipelining_dispatcher::http_pipelining_context::request_size() const
-    noexcept
+size_t http_pipelining_dispatcher::http_pipelining_context::request_size()
+    const noexcept
 {
     return req_end ? request_len : 0;
 }

@@ -21,7 +21,7 @@ int main(int argc, char **argv) {
         if (c == 1)
             worker = optarg;
 
-    pruv::openlog(pruv::log_type::JOURNALD, -1);
+    pruv::openlog(pruv::log_type::JOURNALD, 7);
     if (worker) {
         int r = pruv::worker_loop::setup();
         if (r)
@@ -30,8 +30,10 @@ int main(int argc, char **argv) {
             pruv::workers_reg::instance().get(worker);
         if (loop)
             return loop->run();
-        else
+        else {
+            pruv::log(LOG_EMERG, "Worker \"%s\" not found", worker);
             return EXIT_FAILURE;
+        }
     }
     else {
         testing::InitGoogleTest(&argc, argv);
