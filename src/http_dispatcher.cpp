@@ -20,7 +20,7 @@ http_dispatcher::tcp_http_context * http_dispatcher::create_connection()
 
 void http_dispatcher::free_connection(tcp_context *con) noexcept
 {
-    delete_nothrow(con);
+    delete con;
 }
 
 bool http_dispatcher::tcp_http_context::prepare_for_request(shmem_buffer *buf)

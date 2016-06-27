@@ -20,13 +20,4 @@ struct close_on_return {
     uv_close_cb cb;
 };
 
-template<typename T>
-void delete_nothrow(T *p) noexcept
-{
-    try {
-        delete p;
-    }
-    catch (...) {}
-}
-
 } // namespace pruv

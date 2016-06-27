@@ -19,7 +19,7 @@ http_pipelining_dispatcher::create_connection() noexcept
 
 void http_pipelining_dispatcher::free_connection(tcp_context *con) noexcept
 {
-    delete_nothrow(con);
+    delete con;
 }
 
 bool http_pipelining_dispatcher::http_pipelining_context::validate_request(

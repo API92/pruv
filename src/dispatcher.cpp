@@ -166,7 +166,7 @@ void dispatcher::spawn_worker() noexcept
     }
     struct deleter {
         static void cb(void *w) {
-            delete_nothrow(reinterpret_cast<worker_process *>(w));
+            delete reinterpret_cast<worker_process *>(w);
         }
     };
 
@@ -767,12 +767,12 @@ dispatcher::get_buffer(bool for_request) noexcept
         return nullptr;
     }
     if (!buf->open(nullptr, true)) {
-        delete_nothrow(buf);
+        delete buf;
         return nullptr;
     }
     if (!buf->reset_defaults(for_request ? REQUEST_CHUNK : RESPONSE_CHUNK)) {
         buf->close();
-        delete_nothrow(buf);
+        delete buf;
         return nullptr;
     }
     buf->set_data_size(0);
@@ -786,7 +786,7 @@ void dispatcher::return_buffer(shmem_buffer_node *buf, bool for_request)
     buf->remove_from_list(); // was in in_use_bufs or connection's resp_buffers
     if (!buf->reset_defaults(for_request ? REQUEST_CHUNK : RESPONSE_CHUNK)) {
         buf->close();
-        delete_nothrow(buf);
+        delete buf;
         return;
     }
     assert(!buf->cur_pos()); // after reset_defaults
@@ -803,7 +803,7 @@ void dispatcher::close_buffers(list_node<shmem_buffer_node> &buf_list) noexcept
         buf->close();
         // tcp_stream and worker, which uses this buffer, must be closed before
         // and must not use buffer in close_cb.
-        delete_nothrow(buf);
+        delete buf;
     }
 }
 
