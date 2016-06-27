@@ -34,6 +34,12 @@ bool tcp_con::accept(uv_loop_t *loop, uv_stream_t *server, void *owner,
         log_uv_err(LOG_ERR, "tcp_con::accept uv_tcp_keepalive", r);
         return true;
     }
+
+    if ((r = uv_tcp_nodelay(this, 0))) {
+        log_uv_err(LOG_ERR, "tcp_con::accept uv_tcp_nodelay", r);
+        return true;
+    }
+
     uv_os_fd_t fd;
     if ((r = uv_fileno(base<uv_handle_t *>(), &fd)) < 0) {
         log_uv_err(LOG_ERR, "tcp_con::accept uv_fileno", r);
