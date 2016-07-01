@@ -4,6 +4,7 @@
 
 #include <deque>
 #include <list>
+#include <numeric>
 #include <string>
 
 #include <gtest/gtest.h>

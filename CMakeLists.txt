@@ -1,6 +1,8 @@
 project(pruv)
 cmake_minimum_required(VERSION 2.8)
 
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/modules")
+
 include_directories(include)
 
 if (NOT Threads_FOUND)
@@ -8,11 +10,24 @@ if (NOT Threads_FOUND)
 endif()
 
 if (NOT Systemd_FOUND)
-    set(Systemd_DIR .)
     find_package(Systemd REQUIRED)
-    include_directories(${SYSTEMD_INCLUDE_DIRS})
-    link_directories(${SYSTEMD_LIBRARY_DIRS})
 endif()
+include_directories(${SYSTEMD_INCLUDE_DIRS})
+
+if (NOT Libuv_FOUND)
+    find_package(Libuv REQUIRED)
+endif()
+include_directories(${LIBUV_INCLUDE_DIR})
+
+if (NOT HttpParser_FOUND)
+    find_package(HttpParser REQUIRED)
+endif()
+include_directories(${HTTP_PARSER_INCLUDE_DIR})
+
+if (NOT Gtest_FOUND)
+    find_package(Gtest REQUIRED)
+endif()
+include_directories(${GTEST_INCLUDE_DIR})
 
 add_library(${PROJECT_NAME}
     include/pruv/dispatcher.hpp
@@ -57,24 +72,24 @@ add_executable(${PROJECT_NAME}_test
     test/workers_reg.hpp
 )
 
-target_link_libraries(${PROJECT_NAME} http_parser)
+target_link_libraries(${PROJECT_NAME} ${HTTP_PARSER_LIBRARY})
 target_link_libraries(${PROJECT_NAME} rt)
 target_link_libraries(${PROJECT_NAME} ${SYSTEMD_LIBRARIES})
-target_link_libraries(${PROJECT_NAME} uv)
+target_link_libraries(${PROJECT_NAME} ${LIBUV_LIBRARY})
 
-target_link_libraries(${PROJECT_NAME}d http_parser)
+target_link_libraries(${PROJECT_NAME}d ${HTTP_PARSER_LIBRARY})
 target_link_libraries(${PROJECT_NAME}d ${PROJECT_NAME})
 target_link_libraries(${PROJECT_NAME}d rt)
 target_link_libraries(${PROJECT_NAME}d ${SYSTEMD_LIBRARIES})
-target_link_libraries(${PROJECT_NAME}d uv)
+target_link_libraries(${PROJECT_NAME}d ${LIBUV_LIBRARY})
 add_dependencies(${PROJECT_NAME}d ${PROJECT_NAME})
 
-target_link_libraries(${PROJECT_NAME}_test gtest)
+target_link_libraries(${PROJECT_NAME}_test ${GTEST_LIBRARIES})
 target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
 target_link_libraries(${PROJECT_NAME}_test rt)
 target_link_libraries(${PROJECT_NAME}_test ${SYSTEMD_LIBRARIES})
 target_link_libraries(${PROJECT_NAME}_test ${CMAKE_THREAD_LIBS_INIT})
-target_link_libraries(${PROJECT_NAME}_test uv)
+target_link_libraries(${PROJECT_NAME}_test ${LIBUV_LIBRARY})
 add_dependencies(${PROJECT_NAME}_test ${PROJECT_NAME})
 
 set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_EXTENSIONS OFF)
@@ -83,8 +98,8 @@ set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD_REQUIRED ON)
 
 set_property(TARGET ${PROJECT_NAME}d PROPERTY CXX_EXTENSIONS OFF)
 set_property(TARGET ${PROJECT_NAME}d PROPERTY CXX_STANDARD 14)
-set_property(TARGET ${PROJECT_NAME}d PROPERTY CXX_EXTENSIONS OFF)
+set_property(TARGET ${PROJECT_NAME}d PROPERTY CXX_STANDARD_REQUIRED ON)
 
+set_property(TARGET ${PROJECT_NAME}_test PROPERTY CXX_EXTENSIONS OFF)
 set_property(TARGET ${PROJECT_NAME}_test PROPERTY CXX_STANDARD 14)
-set_property(TARGET ${PROJECT_NAME}_test PROPERTY CXX_STANDARD_REQUIRED ON)
 set_property(TARGET ${PROJECT_NAME}_test PROPERTY CXX_STANDARD_REQUIRED ON)
