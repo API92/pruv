@@ -37,18 +37,18 @@ int worker_loop::setup()
     sigemptyset(&sigact.sa_mask);
     int r = sigaction(SIGTERM, &sigact, nullptr);
     if (r == -1)
-        log_syserr(LOG_ERR, "worker_loop sigaction(SIGTERM)");
+        pruv_log_syserr(LOG_ERR, "worker_loop sigaction(SIGTERM)");
     r = sigaction(SIGINT, &sigact, nullptr);
     if (r == -1)
-        log_syserr(LOG_ERR, "worker_loop sigaction(SIGINT)");
+        pruv_log_syserr(LOG_ERR, "worker_loop sigaction(SIGINT)");
     r = sigaction(SIGHUP, &sigact, nullptr);
     if (r == -1)
-        log_syserr(LOG_ERR, "worker_loop sigaction(SIGHUP)");
+        pruv_log_syserr(LOG_ERR, "worker_loop sigaction(SIGHUP)");
     r = prctl(PR_SET_PDEATHSIG, SIGTERM, 0, 0, 0);
     if (r == -1)
-        log_syserr(LOG_ERR, "worker_loop prctl");
+        pruv_log_syserr(LOG_ERR, "worker_loop prctl");
     if (getppid() == 1) {
-        log(LOG_ERR, "Orphaned at start. Exit.");
+        pruv_log(LOG_ERR, "Orphaned at start. Exit.");
         return EXIT_FAILURE;
     }
     return EXIT_SUCCESS;
@@ -72,7 +72,7 @@ int worker_loop::run()
         if (!clean_after_request())
             return EXIT_FAILURE;
     }
-    log(LOG_NOTICE, "Terminated.");
+    pruv_log(LOG_NOTICE, "Terminated.");
     return EXIT_SUCCESS;
 }
 
@@ -85,8 +85,7 @@ bool worker_loop::read_line() noexcept
             if (errno == EINTR)
                 continue;
             else {
-                log_syserr(LOG_ERR, "worker_loop::read_line "
-                        "read(STDIN_FILENO)");
+                pruv_log_syserr(LOG_ERR, "read(STDIN_FILENO)");
                 return false;
             }
         }
@@ -97,7 +96,7 @@ bool worker_loop::read_line() noexcept
             return true;
         }
         if (dst >= std::end(ln)) {
-            log(LOG_ERR, "Too large input line");
+            pruv_log(LOG_ERR, "Too large input line");
             return false;
         }
     }
@@ -116,7 +115,7 @@ bool worker_loop::next_request() noexcept
             " OUT SHM %255s %" SCNuPTR, req_protocol, buf_in_name,
             &buf_in_pos, &buf_in_len, buf_out_name, &buf_out_file_size);
     if (parsed != 6) {
-        log(LOG_ERR, "Error parsing \"%s\"", ln);
+        pruv_log(LOG_ERR, "Error parsing \"%s\"", ln);
         return false;
     }
 

@@ -31,14 +31,14 @@ bool process::start(uv_loop_t *loop, const char *file, const char * const *args,
     ++wait_close;
     close_on_return close_in((uv_handle_t *)&in, close_cb);
     if ((r = uv_pipe_init(loop, &in, 0)) < 0) {
-        log_uv_err(LOG_ERR, "process::start uv_pipe_init in", r);
+        pruv_log_uv_err(LOG_ERR, "uv_pipe_init in", r);
         return false;
     }
 
     ++wait_close;
     close_on_return close_out((uv_handle_t *)&out, close_cb);
     if ((r = uv_pipe_init(loop, &out, 0)) < 0) {
-        log_uv_err(LOG_ERR, "process::start uv_pipe_init out", r);
+        pruv_log_uv_err(LOG_ERR, "uv_pipe_init out", r);
         return false;
     }
 
@@ -63,7 +63,7 @@ bool process::start(uv_loop_t *loop, const char *file, const char * const *args,
     ++wait_close;
     close_on_return close_this_proc((uv_handle_t *)this, close_cb);
     if ((r = uv_spawn(loop, (uv_process_t *)this, &options)) < 0) {
-        log_uv_err(LOG_ERR, "process::start uv_spawn", r);
+        pruv_log_uv_err(LOG_ERR, "uv_spawn", r);
         return false;
     }
 

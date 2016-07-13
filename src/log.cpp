@@ -134,6 +134,22 @@ void openlog(log_type type, int max_level) noexcept
     logger::logger_impl->set_max_level(max_level);
 }
 
+namespace {
+
+int locations_enabled = 1;
+
+} // namespace
+
+void log_setup_locations(int enable) noexcept
+{
+    locations_enabled = enable;
+}
+
+int log_locations_enabled() noexcept
+{
+    return locations_enabled;
+}
+
 void closelog() noexcept
 {
     if (!logger::logger_impl)
@@ -150,11 +166,47 @@ void log(int level, const char *format, ...) noexcept
         logger::logger_impl->log(level, format, va);
     else
         stderr_logger::write_log_static(level, format, va);
+    va_end(va);
+}
+
+void log_with_location(int level, const char *log_format,
+        const char *src_format, ...) noexcept
+{
+    va_list va;
+    va_start(va, src_format);
+
+    if (log_locations_enabled()) {
+        if (logger::logger_impl)
+            logger::logger_impl->log(level, log_format, va);
+        else
+            stderr_logger::write_log_static(level, log_format, va);
+    }
+    else {
+        va_arg(va, const char *); // skip CODE_FUNC
+        va_arg(va, const char *); // skip CODE_FILE
+        va_arg(va, int); // skip CODE_LINE
+
+        if (logger::logger_impl)
+            logger::logger_impl->log(level, src_format, va);
+        else
+            stderr_logger::write_log_static(level, src_format, va);
+    }
+
+    va_end(va);
 }
 
 void log_syserr(int level, const char *msg) noexcept
 {
     log(level, "%s. Error: %s.", msg, strerror(errno));
+}
+
+void log_syserr_with_location(int level, const char *msg,
+        const char *func, const char *file, int line) noexcept
+{
+    log_with_location(level,
+            "CODE_FUNC=%s CODE_FILE=%s CODE_LINE=%d. %s. Error: %s.",
+            "%s. Error: %s.",
+            func, file, line, msg, strerror(errno));
 }
 
 } // namespace pruv

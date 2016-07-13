@@ -102,8 +102,8 @@ bool dispatcher::start_server(const char *ip, int port) noexcept
     if ((r = uv_ip4_addr(ip, port, &addr4)) < 0) {
         int r2 = uv_ip6_addr(ip, port, &addr6);
         if (r2 < 0) {
-            log_uv_err(LOG_EMERG, "dispatcher::start_server uv_ip4_addr", r);
-            log_uv_err(LOG_EMERG, "dispatcher::start_server uv_ip6_addr", r2);
+            pruv_log_uv_err(LOG_EMERG, "uv_ip4_addr", r);
+            pruv_log_uv_err(LOG_EMERG, "uv_ip6_addr", r2);
             return false;
         }
         else
@@ -114,12 +114,12 @@ bool dispatcher::start_server(const char *ip, int port) noexcept
 
     close_on_return close_server((uv_handle_t *)&tcp_server, nullptr);
     if ((r = uv_tcp_init(loop, &tcp_server)) < 0) {
-        log_uv_err(LOG_EMERG, "dispatcher::start_server uv_tcp_init", r);
+        pruv_log_uv_err(LOG_EMERG, "uv_tcp_init", r);
         return false;
     }
 
     if ((r = uv_tcp_bind(&tcp_server, addr, 0)) < 0) {
-        log_uv_err(LOG_EMERG, "dispatcher::start_server uv_tcp_bind", r);
+        pruv_log_uv_err(LOG_EMERG, "uv_tcp_bind", r);
         return false;
     }
 
@@ -130,13 +130,13 @@ bool dispatcher::start_server(const char *ip, int port) noexcept
         }
     };
 
-    if ((r = uv_listen((uv_stream_t *)&tcp_server, 100, cb::on_conn)) < 0) {
-        log_uv_err(LOG_EMERG, "dispatcher::start_server uv_listen", r);
+    if ((r = uv_listen((uv_stream_t *)&tcp_server, 16384, cb::on_conn)) < 0) {
+        pruv_log_uv_err(LOG_EMERG, "uv_listen", r);
         return false;
     }
 
     close_server.h = nullptr;
-    log(LOG_NOTICE, "Server started at %s:%d", ip, port);
+    pruv_log(LOG_NOTICE, "Server started at %s:%d", ip, port);
     return true;
 }
 
@@ -146,7 +146,7 @@ void dispatcher::stop_server() noexcept
     // If server can't be started, uv_close called in start_server.
     if (!uv_is_closing((uv_handle_t *)&tcp_server))
         uv_close((uv_handle_t *)&tcp_server, nullptr);
-    log(LOG_NOTICE, "Server stopped");
+    pruv_log(LOG_NOTICE, "Server stopped");
 }
 
 void dispatcher::spawn_worker() noexcept
@@ -161,7 +161,7 @@ void dispatcher::spawn_worker() noexcept
     };
     worker_process *worker = new (std::nothrow) worker_process;
     if (!worker) {
-        log(LOG_ERR, "dispatcher::spawn_worker not enough memory for worker");
+        pruv_log(LOG_ERR, "Not enough memory for worker");
         return;
     }
     struct deleter {
@@ -175,7 +175,7 @@ void dispatcher::spawn_worker() noexcept
         // deleter::cb will be called sometime later, or already called.
         return;
 
-    log(LOG_NOTICE, "Worker process %d started.", worker->pid);
+    pruv_log(LOG_NOTICE, "Worker process %d started.", worker->pid);
     // on_worker_exit callback can be called only on next loop iteration
     // after exit from this function.
     // Therefore allowed to call push_back after worker->start.
@@ -211,7 +211,7 @@ void dispatcher::spawn_worker() noexcept
     // Start reading worker's stdout forever.
     int r = uv_read_start((uv_stream_t *)&worker->out, cbr::alloc, cbr::read);
     if (r < 0) {
-        log_uv_err(LOG_ERR, "dispatcher::spawn_worker uv_read_start", r);
+        pruv_log_uv_err(LOG_ERR, "uv_read_start", r);
         return kill_worker(worker);
     }
 }
@@ -224,9 +224,9 @@ void dispatcher::kill_worker(worker_process *w) noexcept
     // on_worker_read assumes loop is not null.
     int r;
     if ((r = uv_read_stop((uv_stream_t *)&w->out)) < 0)
-        log_uv_err(LOG_ERR, "dispatcher::kill_worker uv_read_stop", r);
+        pruv_log_uv_err(LOG_ERR, "uv_read_stop", r);
     if (!w->exited && (r = uv_process_kill(w, SIGTERM)) < 0)
-        log_uv_err(LOG_ERR, "dispatcher::kill_worker uv_process_kill", r);
+        pruv_log_uv_err(LOG_ERR, "uv_process_kill", r);
     w->remove_from_list();
     w->timeout = uv_now(loop) + KILL_TIMEOUT;
     terminated_workers.push_back(w);
@@ -235,7 +235,7 @@ void dispatcher::kill_worker(worker_process *w) noexcept
 void dispatcher::on_worker_exit(worker_process *w, int64_t exit_code, int sig)
     noexcept
 {
-    log(LOG_NOTICE, "Worker %d exited with code %" PRId64 " caused signal %d.",
+    pruv_log(LOG_NOTICE, "Worker %d exited with code %" PRId64 " caused signal %d.",
             w->pid, exit_code, sig);
     w->exited = true;
     w->remove_from_list();
@@ -259,13 +259,13 @@ void dispatcher::on_connection(uv_stream_t *server, int status) noexcept
 {
     assert(loop);
     if (status < 0)
-        return log_uv_err(LOG_ERR, "on_connection", status);
+        return pruv_log_uv_err(LOG_ERR, "on_connection", status);
 
-    log(LOG_DEBUG, "Connection received. Status = %d.", status);
+    pruv_log(LOG_DEBUG, "Connection received. Status = %d.", status);
 
     tcp_context *con = create_connection();
     if (!con)
-        return log(LOG_ERR, "dispatcher::on_connection no memory for connect");
+        return pruv_log(LOG_ERR, "No memory for connect");
 
     struct deleter {
         static void cb(tcp_con *p) {
@@ -320,8 +320,8 @@ void dispatcher::read_con_cb(tcp_context *con, ssize_t nread, const uv_buf_t *)
     assert(loop);
     con->reading_in_buf = false;
     if (nread < 0) {
-        log_uv_err(nread == UV_EOF ? LOG_DEBUG : LOG_ERR,
-                "dispatcher::read_con_cb", nread);
+        pruv_log_uv_err(nread == UV_EOF ? LOG_DEBUG : LOG_ERR,
+                "", nread);
         con->remove_from_dispatcher();
     }
     else if (nread > 0) {
@@ -339,7 +339,7 @@ void dispatcher::read_con_cb(tcp_context *con, ssize_t nread, const uv_buf_t *)
 
         // Fully received message to be processed.
         if (con->request_size()) {
-            log(LOG_DEBUG, "Request message parsed (%" PRIuPTR " bytes "
+            pruv_log(LOG_DEBUG, "Request message parsed (%" PRIuPTR " bytes "
                     "starting from %" PRIuPTR " byte).",
                     con->request_size(), con->request_pos());
             respond_or_enqueue(con);
@@ -415,7 +415,7 @@ void dispatcher::schedule() noexcept
         spawn_worker();
         if (free_workers.empty()) {
             // Сan't serve any request if spawning worker failed.
-            log(LOG_ERR, "dispatcher::schedule no worker for request. "
+            pruv_log(LOG_ERR, "dispatcher::schedule no worker for request. "
                 "Close connections.");
             return close_connections(clients_scheduling);
         }
@@ -424,7 +424,7 @@ void dispatcher::schedule() noexcept
     shmem_buffer_node * resp_buf = get_buffer(false);
     if (!resp_buf) {
         // Сan't serve any request if opening buffer failed.
-        log(LOG_ERR, "dispatcher::schedule no buffer for response. "
+        pruv_log(LOG_ERR, "dispatcher::schedule no buffer for response. "
                 "Close connections.");
         return close_connections(clients_scheduling);
     }
@@ -448,7 +448,7 @@ void dispatcher::schedule() noexcept
             resp_buf->name(), resp_buf->file_size());
         if (req_len >= 0 && req_len < (int)sizeof(w.pipe_buf))
             break;
-        log(LOG_ERR, "dispatcher::schedule can't snprintf request params");
+        pruv_log(LOG_ERR, "dispatcher::schedule can't snprintf request params");
         con->remove_from_dispatcher();
         con = nullptr;
     }
@@ -474,13 +474,13 @@ void dispatcher::schedule() noexcept
             worker_process *w = reinterpret_cast<worker_process *>(req->data);
             dispatcher *d = reinterpret_cast<dispatcher *>(w->owner);
             if (status != 0) {
-                log_uv_err(LOG_ERR, "dispatcher::schedule cb::write", status);
+                pruv_log_uv_err(LOG_ERR, "", status);
                 if (w->processed_con)
                     w->processed_con->remove_from_dispatcher();
                 return d->kill_worker(w);
             }
-            log(LOG_DEBUG, "dispatcher::schedule cb::write request sent to "
-                    "worker");
+            pruv_log(LOG_DEBUG, "dispatcher::schedule cb::write request sent to"
+                    " worker");
             assert(w->io_state == worker_process::IO_WRITE);
             // Before writing pipe_buf_ptr was at start. Writing don't move it.
             assert(w->pipe_buf_ptr == w->pipe_buf);
@@ -494,7 +494,7 @@ void dispatcher::schedule() noexcept
     uv_buf_t buf = uv_buf_init(w.pipe_buf, req_len);
     int r = uv_write(&w.write_req, (uv_stream_t *)&w.in, &buf, 1, cb::write);
     if (r < 0) {
-        log_uv_err(LOG_ERR, "dispatcher::schedule uv_write", r);
+        pruv_log_uv_err(LOG_ERR, "uv_write", r);
         kill_worker(&w);
         con->remove_from_dispatcher();
     }
@@ -505,12 +505,12 @@ void dispatcher::on_worker_read(worker_process *w, ssize_t nread,
 {
     assert(loop); // Because uv_read_stop was called in kill_process.
     if (nread < 0) {
-        log_uv_err(LOG_ERR, "dispatcher::on_worker_read nread", nread);
+        pruv_log_uv_err(LOG_ERR, "nread", nread);
         return kill_worker(w);
     }
 
     if (w->io_state != worker_process::IO_READ) {
-        log(LOG_ERR, "dispatcher::on_worker_read worker not in read state");
+        pruv_log(LOG_ERR, "Worker not in read state");
         return kill_worker(w);
     }
 
@@ -521,7 +521,7 @@ void dispatcher::on_worker_read(worker_process *w, ssize_t nread,
         return;
 
     // Now response from worker fully received.
-    log(LOG_DEBUG, "dispatcher::on_worker_read response received from worker");
+    pruv_log(LOG_DEBUG, "Response received from worker");
 
     // Parse response length.
     buf->base[nread - 1] = 0;
@@ -529,12 +529,10 @@ void dispatcher::on_worker_read(worker_process *w, ssize_t nread,
     size_t resp_file_size;
     if (sscanf(w->pipe_buf, "RESP %" SCNuPTR " of %" SCNuPTR " END",
                 &resp_len, &resp_file_size) != 2) {
-        log(LOG_ERR, "dispatcher::on_worker_read sscanf can't parse response "
-                "\"%s\".", buf->base);
+        pruv_log(LOG_ERR, "sscanf can't parse response \"%s\".", buf->base);
         return kill_worker(w);
     }
-    log(LOG_DEBUG, "dispatcher::on_worker_read response of %" PRIuPTR " bytes "
-            "ready", resp_len);
+    pruv_log(LOG_DEBUG, "Response of %" PRIuPTR " bytes ready", resp_len);
 
     assert(w->in_buf);
     assert(w->out_buf);
@@ -650,11 +648,11 @@ void dispatcher::write_con(tcp_context *con) noexcept
                 return;
             size_t chunk_size = (size_t)req->data;
             if (status < 0) {
-                log_uv_err(LOG_ERR, "dispatcher::write_con cb::write", status);
+                pruv_log_uv_err(LOG_ERR, "", status);
                 return con->remove_from_dispatcher();
             }
             con->resp_buffers.front().move_ptr(chunk_size);
-            log(LOG_DEBUG, "Response chunk of %" PRIuPTR " bytes written",
+            pruv_log(LOG_DEBUG, "Response chunk of %" PRIuPTR " bytes written",
                     chunk_size);
             con->get_dispatcher()->write_con(con);
         }
@@ -665,7 +663,7 @@ void dispatcher::write_con(tcp_context *con) noexcept
     int r = uv_write(&con->write_req, con->base<uv_stream_t *>(), &wbuf, 1,
             cb::write);
     if (r < 0) {
-        log_uv_err(LOG_ERR, "dispatcher::write_con uv_write", r);
+        pruv_log_uv_err(LOG_ERR, "uv_write", r);
         return con->remove_from_dispatcher();
     }
 }
@@ -673,7 +671,7 @@ void dispatcher::write_con(tcp_context *con) noexcept
 void dispatcher::on_end_write_con(tcp_context *con) noexcept
 {
     assert(loop);
-    log(LOG_DEBUG, "dispatcher::on_end_write_con response sended");
+    pruv_log(LOG_DEBUG, "Response sended");
     if (con->finish_response()) {
         return_buffer(&con->resp_buffers.front(), false);
         --con->resp_buffers_num;
@@ -744,7 +742,7 @@ void dispatcher::move_to(tcp_context::list_id_enum dst, tcp_context *con)
         clients_writing.push_back(con);
         dst_name = "LIST_WRITING";
     }
-    log(LOG_DEBUG, "dispatcher::move_to connection moved to list %s", dst_name);
+    pruv_log(LOG_DEBUG, "Connection moved to list %s", dst_name);
 }
 
 dispatcher::shmem_buffer_node *
@@ -763,7 +761,7 @@ dispatcher::get_buffer(bool for_request) noexcept
 
     shmem_buffer_node *buf = new (std::nothrow) shmem_buffer_node;
     if (!buf) {
-        log(LOG_ERR, "dispatcher::get_buffer no memory for shmem_buffer_node");
+        pruv_log(LOG_ERR, "No memory for shmem_buffer_node");
         return nullptr;
     }
     if (!buf->open(nullptr, true)) {
@@ -813,7 +811,7 @@ bool dispatcher::start_timer() noexcept
     int r;
     close_on_return close_timer((uv_handle_t *)&timer, nullptr);
     if ((r = uv_timer_init(loop, &timer)) < 0) {
-        log_uv_err(LOG_ERR, "dispatcher::start_timer uv_timer_init", r);
+        pruv_log_uv_err(LOG_ERR, "uv_timer_init", r);
         return false;
     }
 
@@ -825,7 +823,7 @@ bool dispatcher::start_timer() noexcept
 
     timer.data = this;
     if ((r = uv_timer_start(&timer, cb::timeout, 0, TIMER_PERIOD)) < 0) {
-        log_uv_err(LOG_ERR, "dispatcher::start_timer uv_timer_start", r);
+        pruv_log_uv_err(LOG_ERR, "uv_timer_start", r);
         return false;
     }
 
@@ -856,7 +854,7 @@ void dispatcher::on_timer_tick() noexcept
         assert(!terminated_workers.front().exited);
         int r = uv_process_kill(&terminated_workers.front(), SIGKILL);
         if (r < 0)
-            log_uv_err(LOG_ERR, "dispatcher::on_timer_tick uv_process_kill", r);
+            pruv_log_uv_err(LOG_ERR, "uv_process_kill", r);
     }
     while (!in_use_workers.empty() && in_use_workers.front().timeout <= now)
         kill_worker(&in_use_workers.front());
@@ -903,7 +901,7 @@ void dispatcher::tcp_context::remove_from_dispatcher() noexcept
     if (!empty()) // may be not in any list (for example, in schedule)
         remove_from_list();
     close();
-    log(LOG_DEBUG, "Connection closed.");
+    pruv_log(LOG_DEBUG, "Connection closed.");
 }
 
 bool dispatcher::tcp_context::read_start() noexcept
@@ -923,12 +921,10 @@ bool dispatcher::tcp_context::read_start() noexcept
     // Start connection reading.
     int r = uv_read_start(base<uv_stream_t *>(), cb::alloc, cb::read);
     if (r < 0) {
-        log_uv_err(LOG_ERR, "dispatcher::tcp_context::read_start uv_read_start",
-                r);
+        pruv_log_uv_err(LOG_ERR, "uv_read_start", r);
         return false;
     }
-    log(LOG_DEBUG, "dispatcher::tcp_context::read_start reading connection "
-            "begin");
+    pruv_log(LOG_DEBUG, "reading connection begin");
     return true;
 }
 
@@ -936,11 +932,10 @@ bool dispatcher::tcp_context::read_stop() noexcept
 {
     int r = uv_read_stop(base<uv_stream_t *>());
     if (r < 0) {
-        log_uv_err(LOG_ERR, "dispatcher::tcp_context::read_stop uv_read_stop",
-                r);
+        pruv_log_uv_err(LOG_ERR, "uv_read_stop", r);
         return false;
     }
-    log(LOG_DEBUG, "dispatcher::tcp_context::read_stop reading connection end");
+    pruv_log(LOG_DEBUG, "Reading connection end");
     return true;
 }
 

@@ -43,20 +43,20 @@ bool shmem_buffer::open(const char *name, bool for_write) noexcept
     if (!name) {
         uint64_t rnd[2];
         if (!random_bytes(&rnd, sizeof(rnd))) {
-            log(LOG_ERR, "Can't generate random shmem name");
+            pruv_log(LOG_ERR, "Can't generate random shmem name");
             return false;
         }
 
         size_t buflen = 50;
         char *new_name = (char *)malloc(buflen);
         if (!new_name) {
-            log(LOG_ERR, "shmem_buffer::open not enough memory for name");
+            pruv_log(LOG_ERR, "Not enough memory for name");
             return false;
         }
         int r = snprintf(new_name, buflen, "/pruv-shm-%0.16" PRIx64
                 "%0.16" PRIx64, rnd[0], rnd[1]);
         if (r < 0 || r >= (int)buflen) {
-            log(LOG_ERR, "shmem_buffer::open error printing random name");
+            pruv_log(LOG_ERR, "Error printing random name");
             free(new_name);
             return false;
         }
@@ -68,11 +68,11 @@ bool shmem_buffer::open(const char *name, bool for_write) noexcept
 
     fd = shm_open(name, oflag, mode);
     if (fd == -1) {
-        log_syserr(LOG_ERR, "shmem_buffer::open shm_open");
+        pruv_log_syserr(LOG_ERR, "shmem_buffer::open shm_open");
         return false;
     }
-    log((name_ ? LOG_NOTICE : LOG_DEBUG), "Opened shared memory object %s, "
-            "fd = %d", name, fd);
+    pruv_log((name_ ? LOG_NOTICE : LOG_DEBUG), "Opened shared memory object %s,"
+            " fd = %d", name, fd);
 
     file_size_ = 0;
     writable = for_write;
@@ -91,7 +91,7 @@ bool shmem_buffer::resize(size_t new_size) noexcept
         }
         if (errno == EINTR)
             continue;
-        log_syserr(LOG_ERR, "shmem_buffer::resize ftruncate");
+        pruv_log_syserr(LOG_ERR, "ftruncate");
         return false;
     }
 }
@@ -118,7 +118,7 @@ bool shmem_buffer::unmap() noexcept
         return true;
     }
 
-    log_syserr(LOG_ERR, "shmem_buffer::unmap unmap");
+    pruv_log_syserr(LOG_ERR, "unmap");
     return false;
 }
 
@@ -129,11 +129,11 @@ char * shmem_buffer::map_impl(size_t offset, size_t size) const noexcept
         prot |= PROT_WRITE;
     void *r = mmap(nullptr, size, prot, MAP_SHARED, fd, offset);
     if (r == MAP_FAILED) {
-        log_syserr(LOG_ERR, "shmem_buffer::map_impl mmap");
+        pruv_log_syserr(LOG_ERR, "mmap");
         return nullptr;
     }
     else if (!r) {
-        log(LOG_ERR, "shmem_buffer::map_impl mmap returns null pointer");
+        pruv_log(LOG_ERR, "mmap returns null pointer");
         // Allow zero page to leak.
         return nullptr;
     }
@@ -194,19 +194,20 @@ bool shmem_buffer::close() noexcept
     res &= unmap();
     if (name_) {
         if (shm_unlink(name_) == -1) {
-            log_syserr(LOG_ERR, "shmem_buffer::close shm_unlink");
+            pruv_log_syserr(LOG_ERR, "shm_unlink");
             res = false;
         }
-        log(LOG_NOTICE, "Unlinked shared memory object %s, fd = %d", name_, fd);
+        pruv_log(LOG_NOTICE, "Unlinked shared memory object %s, fd = %d",
+                 name_, fd);
         free((void *)name_);
         name_ = nullptr;
     }
 
     if (::close(fd) == -1) {
-        log_syserr(LOG_ERR, "shmem_buffer::close close");
+        pruv_log_syserr(LOG_ERR, "close");
         res = false;
     }
-    log(LOG_DEBUG, "Closed shared memory object, fd = %d", fd);
+    pruv_log(LOG_DEBUG, "Closed shared memory object, fd = %d", fd);
     fd = -1;
     file_size_ = 0;
     return res;

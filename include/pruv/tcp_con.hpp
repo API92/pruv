@@ -14,6 +14,9 @@ public:
             void (*deleter)(tcp_con *)) noexcept;
     void close() noexcept;
 
+    bool set_tcp_keepalive(int enable, unsigned delay, unsigned interval,
+            unsigned cnt) noexcept;
+
     template<typename T>
     T base() { return reinterpret_cast<T>(this); }
 

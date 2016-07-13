@@ -21,12 +21,12 @@ namespace {
 bool generate_response(char *request, size_t req_len, shmem_buffer *resp)
 {
     if (req_len < sizeof(size_t) + 1) {
-        log(LOG_ERR, "Request is too small");
+        pruv_log(LOG_ERR, "Request is too small");
         return false;
     }
     size_t body_len = *reinterpret_cast<size_t *>(request);
     if (sizeof(size_t) + 1 + body_len != req_len) {
-        log(LOG_ERR, "Request length %" PRIuPTR " is wrong", req_len);
+        pruv_log(LOG_ERR, "Request length %" PRIuPTR " is wrong", req_len);
         return false;
     }
     bool keep_alive = request[sizeof(size_t)];

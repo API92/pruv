@@ -63,13 +63,13 @@ bool http_dispatcher::tcp_http_context::parse_request(shmem_buffer *buf)
     size_t len = buf->data_size() - buf->cur_pos();
     size_t nparsed = http_parser_execute(&parser, &settings,
             buf->map_ptr(), len);
-    log(LOG_DEBUG, "Parsed %" PRIuPTR " bytes of %" PRIuPTR, nparsed, len);
+    pruv_log(LOG_DEBUG, "Parsed %" PRIuPTR " bytes of %" PRIuPTR, nparsed, len);
     if (nparsed != len) {
-        log(LOG_WARNING, "HTTP parsing error.");
+        pruv_log(LOG_WARNING, "HTTP parsing error.");
         return false;
     }
     if (parser.upgrade) {
-        log(LOG_WARNING, "HTTP Upgrade not supported. Close connection.");
+        pruv_log(LOG_WARNING, "HTTP Upgrade not supported. Close connection.");
         return false;
     }
 

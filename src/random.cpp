@@ -20,7 +20,7 @@ bool random_bytes(void *dst, size_t len) noexcept
         if (rnd == -1) {
             if (errno == EINTR)
                 continue;
-            log_syserr(LOG_ERR, "shmem_buffer::open open /dev/urandom");
+            pruv_log_syserr(LOG_ERR, "open /dev/urandom");
             return false;
         }
         break;
@@ -34,9 +34,9 @@ bool random_bytes(void *dst, size_t len) noexcept
         if (r > 0 || (r == -1 && errno == EINTR))
             continue;
         if (r == 0)
-            log(LOG_ERR, "read(/dev/urandom) readed 0 bytes");
+            pruv_log(LOG_ERR, "read(/dev/urandom) readed 0 bytes");
         else
-            log_syserr(LOG_ERR, "random_bytes read");
+            pruv_log_syserr(LOG_ERR, "random_bytes read");
         break;
     }
 
@@ -45,7 +45,7 @@ bool random_bytes(void *dst, size_t len) noexcept
         if (r == -1 && EINTR)
             continue;
         if (r == -1)
-            log_syserr(LOG_ERR, "random_bytes close(/dev/urandom)");
+            pruv_log_syserr(LOG_ERR, "random_bytes close(/dev/urandom)");
         break;
     }
 

@@ -69,14 +69,15 @@ bool http_pipelining_dispatcher::http_pipelining_context::parse_request(
         assert(len);
         size_t nparsed = http_parser_execute(&parser_in, &settings,
                 buf->map_ptr(), len);
-        log(LOG_DEBUG, "Parsed %" PRIuPTR " bytes of %" PRIuPTR " starting from"
-                " %" PRIuPTR, nparsed, len, request_pos_ + request_len);
+        pruv_log(LOG_DEBUG, "Parsed %" PRIuPTR " bytes of %" PRIuPTR " starting"
+                " from %" PRIuPTR, nparsed, len, request_pos_ + request_len);
         if (!req_end && nparsed != len) {
-            log(LOG_WARNING, "HTTP parsing error.");
+            pruv_log(LOG_WARNING, "HTTP parsing error.");
             return false;
         }
         if (parser_in.upgrade) {
-            log(LOG_WARNING, "HTTP Upgrade not supported. Close connection.");
+            pruv_log(LOG_WARNING, "HTTP Upgrade not supported. "
+                    "Close connection.");
             return false;
         }
         request_len += nparsed;

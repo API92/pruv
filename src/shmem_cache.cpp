@@ -38,10 +38,10 @@ shmem_buffer * shmem_cache::get(const char *name) noexcept
         return buf;
     }
     catch (std::exception &e) {
-        log(LOG_ERR, "shmem_cache::get %s", e.what());
+        pruv_log(LOG_ERR, "%s", e.what());
     }
     catch (...) {
-        log(LOG_ERR, "shmem_cache::get unknown exception");
+        pruv_log(LOG_ERR, "Unknown exception");
     }
     return nullptr;
 }
