@@ -123,14 +123,12 @@ bool dispatcher::start_server(const char *ip, int port) noexcept
         return false;
     }
 
-    struct cb {
-        static void on_conn(uv_stream_t *server, int status) {
-            dispatcher *d = reinterpret_cast<dispatcher *>(server->data);
-            d->on_connection(server, status);
-        }
+    auto on_conn = [](uv_stream_t *server, int status) {
+        dispatcher *d = reinterpret_cast<dispatcher *>(server->data);
+        d->on_connection(server, status);
     };
 
-    if ((r = uv_listen((uv_stream_t *)&tcp_server, 16384, cb::on_conn)) < 0) {
+    if ((r = uv_listen((uv_stream_t *)&tcp_server, 16384, on_conn)) < 0) {
         pruv_log_uv_err(LOG_EMERG, "uv_listen", r);
         return false;
     }
@@ -152,27 +150,22 @@ void dispatcher::stop_server() noexcept
 void dispatcher::spawn_worker() noexcept
 {
     assert(loop);
-    struct cb {
-        static void on_exit(uv_process_t *p, int64_t exit_code, int signal) {
-            worker_process *worker = static_cast<worker_process *>(p);
-            dispatcher *d = reinterpret_cast<dispatcher *>(worker->owner);
-            d->on_worker_exit(worker, exit_code, signal);
-        }
+    auto on_exit = [](uv_process_t *p, int64_t exit_code, int signal) {
+        worker_process *worker = static_cast<worker_process *>(p);
+        dispatcher *d = reinterpret_cast<dispatcher *>(worker->owner);
+        d->on_worker_exit(worker, exit_code, signal);
     };
     worker_process *worker = new (std::nothrow) worker_process;
     if (!worker) {
         pruv_log(LOG_ERR, "Not enough memory for worker");
         return;
     }
-    struct deleter {
-        static void cb(void *w) {
-            delete reinterpret_cast<worker_process *>(w);
-        }
+    auto deleter = [](void *w) {
+        delete reinterpret_cast<worker_process *>(w);
     };
 
-    if (!worker->start(loop, worker_name, worker_args, this,
-                cb::on_exit, deleter::cb))
-        // deleter::cb will be called sometime later, or already called.
+    if (!worker->start(loop, worker_name, worker_args, this, on_exit, deleter))
+        // deleter will be called sometime later, or already called.
         return;
 
     pruv_log(LOG_NOTICE, "Worker process %d started.", worker->pid);
@@ -182,34 +175,32 @@ void dispatcher::spawn_worker() noexcept
     free_workers.push_back(worker);
     ++workers_cnt;
 
-    struct cbr {
-        static void alloc(uv_handle_t *h, size_t /*sz*/, uv_buf_t *buf) {
-            // process class stores pointer to it in it's pipes data member.
-            // h is pipe.
-            process *p = reinterpret_cast<process *>(h->data);
-            worker_process *w = static_cast<worker_process *>(p);
-            // io_state may be some other, then IO_READ if worker writes
-            // trash to stdout or dies (and we receive EOF).
-            if (w->io_state != worker_process::IO_READ ||
-                w->pipe_buf_ptr >= std::end(w->pipe_buf)) {
-                *buf = uv_buf_init(nullptr, 0);
-                return;
-            }
-            *buf = uv_buf_init(w->pipe_buf_ptr,
-                    std::end(w->pipe_buf) - w->pipe_buf_ptr);
+    auto alloc_cb = [](uv_handle_t *h, size_t /*sz*/, uv_buf_t *buf) {
+        // process class stores pointer to it in it's pipes data member.
+        // h is pipe.
+        process *p = reinterpret_cast<process *>(h->data);
+        worker_process *w = static_cast<worker_process *>(p);
+        // io_state may be some other, then IO_READ if worker writes
+        // trash to stdout or dies (and we receive EOF).
+        if (w->io_state != worker_process::IO_READ ||
+            w->pipe_buf_ptr >= std::end(w->pipe_buf)) {
+            *buf = uv_buf_init(nullptr, 0);
+            return;
         }
+        *buf = uv_buf_init(w->pipe_buf_ptr,
+                std::end(w->pipe_buf) - w->pipe_buf_ptr);
+    };
 
-        static void read(uv_stream_t *s, ssize_t nread, const uv_buf_t *buf) {
-            // process class stores pointer to it in it's pipes data member.
-            // s is pipe.
-            process *p = reinterpret_cast<process *>(s->data);
-            worker_process *w = static_cast<worker_process *>(p);
-            reinterpret_cast<dispatcher *>(w->owner)->on_worker_read(
-                    w, nread, buf);
-        }
+    auto read_cb = [](uv_stream_t *s, ssize_t nread, const uv_buf_t *buf) {
+        // process class stores pointer to it in it's pipes data member.
+        // s is pipe.
+        process *p = reinterpret_cast<process *>(s->data);
+        worker_process *w = static_cast<worker_process *>(p);
+        reinterpret_cast<dispatcher *>(w->owner)->on_worker_read(
+                w, nread, buf);
     };
     // Start reading worker's stdout forever.
-    int r = uv_read_start((uv_stream_t *)&worker->out, cbr::alloc, cbr::read);
+    int r = uv_read_start((uv_stream_t *)&worker->out, alloc_cb, read_cb);
     if (r < 0) {
         pruv_log_uv_err(LOG_ERR, "uv_read_start", r);
         return kill_worker(worker);
@@ -267,14 +258,12 @@ void dispatcher::on_connection(uv_stream_t *server, int status) noexcept
     if (!con)
         return pruv_log(LOG_ERR, "No memory for connect");
 
-    struct deleter {
-        static void cb(tcp_con *p) {
-            tcp_context *con = static_cast<tcp_context *>(p);
-            con->get_dispatcher()->free_connection(con);
-        }
+    auto deleter = [](tcp_con *p) {
+        tcp_context *con = static_cast<tcp_context *>(p);
+        con->get_dispatcher()->free_connection(con);
     };
 
-    if (!con->accept(loop, server, this, deleter::cb))
+    if (!con->accept(loop, server, this, deleter))
         // deleter::cb will be called sometime later.
         return;
 
@@ -466,33 +455,31 @@ void dispatcher::schedule() noexcept
     in_use_workers.push_back(&w);
     move_to(tcp_context::LIST_PROCESSING, con);
 
-    struct cb {
-        static void write(uv_write_t *req, int status) {
-            // This callback may be called after worker death.
-            // But worker_process structure will alive while pipe's
-            // structures alive.
-            worker_process *w = reinterpret_cast<worker_process *>(req->data);
-            dispatcher *d = reinterpret_cast<dispatcher *>(w->owner);
-            if (status != 0) {
-                pruv_log_uv_err(LOG_ERR, "", status);
-                if (w->processed_con)
-                    w->processed_con->remove_from_dispatcher();
-                return d->kill_worker(w);
-            }
-            pruv_log(LOG_DEBUG, "dispatcher::schedule cb::write request sent to"
-                    " worker");
-            assert(w->io_state == worker_process::IO_WRITE);
-            // Before writing pipe_buf_ptr was at start. Writing don't move it.
-            assert(w->pipe_buf_ptr == w->pipe_buf);
-            w->io_state = worker_process::IO_READ;
+    auto write_cb = [](uv_write_t *req, int status) {
+        // This callback may be called after worker death.
+        // But worker_process structure will alive while pipe's
+        // structures alive.
+        worker_process *w = reinterpret_cast<worker_process *>(req->data);
+        dispatcher *d = reinterpret_cast<dispatcher *>(w->owner);
+        if (status != 0) {
+            pruv_log_uv_err(LOG_ERR, "", status);
+            if (w->processed_con)
+                w->processed_con->remove_from_dispatcher();
+            return d->kill_worker(w);
         }
+        pruv_log(LOG_DEBUG, "dispatcher::schedule cb::write request sent to"
+                " worker");
+        assert(w->io_state == worker_process::IO_WRITE);
+        // Before writing pipe_buf_ptr was at start. Writing don't move it.
+        assert(w->pipe_buf_ptr == w->pipe_buf);
+        w->io_state = worker_process::IO_READ;
     };
 
     // Send request to worker.
     w.write_req.data = &w;
     w.io_state = worker_process::IO_WRITE;
     uv_buf_t buf = uv_buf_init(w.pipe_buf, req_len);
-    int r = uv_write(&w.write_req, (uv_stream_t *)&w.in, &buf, 1, cb::write);
+    int r = uv_write(&w.write_req, (uv_stream_t *)&w.in, &buf, 1, write_cb);
     if (r < 0) {
         pruv_log_uv_err(LOG_ERR, "uv_write", r);
         kill_worker(&w);
@@ -639,29 +626,27 @@ void dispatcher::write_con(tcp_context *con) noexcept
     size_t chunk_size = std::min(size_t(buf->map_end() - buf->map_ptr()),
             buf->data_size() - buf->cur_pos());
 
-    struct cb {
-        static void write(uv_write_t *req, int status) {
-            tcp_context *con = static_cast<tcp_context *>(
-                    tcp_con::from(req->handle));
-            if (!con->resp_buffers_num)
-                // Connection was closed and buffers was returned to pool.
-                return;
-            size_t chunk_size = (size_t)req->data;
-            if (status < 0) {
-                pruv_log_uv_err(LOG_ERR, "", status);
-                return con->remove_from_dispatcher();
-            }
-            con->resp_buffers.front().move_ptr(chunk_size);
-            pruv_log(LOG_DEBUG, "Response chunk of %" PRIuPTR " bytes written",
-                    chunk_size);
-            con->get_dispatcher()->write_con(con);
+    auto write_cb = [](uv_write_t *req, int status) {
+        tcp_context *con = static_cast<tcp_context *>(
+                tcp_con::from(req->handle));
+        if (!con->resp_buffers_num)
+            // Connection was closed and buffers was returned to pool.
+            return;
+        size_t chunk_size = (size_t)req->data;
+        if (status < 0) {
+            pruv_log_uv_err(LOG_ERR, "", status);
+            return con->remove_from_dispatcher();
         }
+        con->resp_buffers.front().move_ptr(chunk_size);
+        pruv_log(LOG_DEBUG, "Response chunk of %" PRIuPTR " bytes written",
+                chunk_size);
+        con->get_dispatcher()->write_con(con);
     };
 
     uv_buf_t wbuf = uv_buf_init(buf->map_ptr(), chunk_size);
     con->write_req.data = (void *)chunk_size;
     int r = uv_write(&con->write_req, con->base<uv_stream_t *>(), &wbuf, 1,
-            cb::write);
+            write_cb);
     if (r < 0) {
         pruv_log_uv_err(LOG_ERR, "uv_write", r);
         return con->remove_from_dispatcher();
@@ -815,14 +800,12 @@ bool dispatcher::start_timer() noexcept
         return false;
     }
 
-    struct cb {
-        static void timeout(uv_timer_t *t) {
-            reinterpret_cast<dispatcher *>(t->data)->on_timer_tick();
-        }
+    auto timeout_cb = [](uv_timer_t *t) {
+        reinterpret_cast<dispatcher *>(t->data)->on_timer_tick();
     };
 
     timer.data = this;
-    if ((r = uv_timer_start(&timer, cb::timeout, 0, TIMER_PERIOD)) < 0) {
+    if ((r = uv_timer_start(&timer, timeout_cb, 0, TIMER_PERIOD)) < 0) {
         pruv_log_uv_err(LOG_ERR, "uv_timer_start", r);
         return false;
     }
@@ -906,20 +889,18 @@ void dispatcher::tcp_context::remove_from_dispatcher() noexcept
 
 bool dispatcher::tcp_context::read_start() noexcept
 {
-    struct cb {
-        static void alloc(uv_handle_t *h, size_t size, uv_buf_t *buf) {
-            tcp_context *strm = static_cast<tcp_context *>(tcp_con::from(h));
-            strm->get_dispatcher()->read_con_alloc_cb(strm, size, buf);
-        }
+    auto alloc_cb = [](uv_handle_t *h, size_t size, uv_buf_t *buf) {
+        tcp_context *strm = static_cast<tcp_context *>(tcp_con::from(h));
+        strm->get_dispatcher()->read_con_alloc_cb(strm, size, buf);
+    };
 
-        static void read(uv_stream_t *s, ssize_t nread, const uv_buf_t *buf) {
-            tcp_context *strm = static_cast<tcp_context *>(tcp_con::from(s));
-            strm->get_dispatcher()->read_con_cb(strm, nread, buf);
-        }
+    auto read_cb = [](uv_stream_t *s, ssize_t nread, const uv_buf_t *buf) {
+        tcp_context *strm = static_cast<tcp_context *>(tcp_con::from(s));
+        strm->get_dispatcher()->read_con_cb(strm, nread, buf);
     };
 
     // Start connection reading.
-    int r = uv_read_start(base<uv_stream_t *>(), cb::alloc, cb::read);
+    int r = uv_read_start(base<uv_stream_t *>(), alloc_cb, read_cb);
     if (r < 0) {
         pruv_log_uv_err(LOG_ERR, "uv_read_start", r);
         return false;
