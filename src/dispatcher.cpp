@@ -30,17 +30,15 @@ dispatcher::~dispatcher()
     assert(uv_is_closing((uv_handle_t *)&tcp_server));
 
     assert(clients_idle.empty());
-    assert(clients_reading.empty());
+    assert(clients_io.empty());
     assert(clients_scheduling.empty());
     assert(clients_processing.empty());
-    assert(clients_writing.empty());
 
     assert(free_workers.empty());
     assert(in_use_workers.empty());
 
     assert(req_bufs.empty());
     assert(resp_bufs.empty());
-    assert(in_use_bufs.empty());
 }
 
 void dispatcher::start(uv_loop_t *new_loop, const char *ip, int port,
@@ -53,7 +51,7 @@ void dispatcher::start(uv_loop_t *new_loop, const char *ip, int port,
     this->worker_args = worker_args;
     bool ok = true;
     ok &= start_server(ip, port);
-    ok &= start_timer();
+    ok &= start_timer(); // Initialize timer before stop it.
     if (!ok)
         stop();
 }
@@ -62,10 +60,9 @@ void dispatcher::stop() noexcept
 {
     assert(loop);
     close_connections(clients_idle);
-    close_connections(clients_reading);
+    close_connections(clients_io);
     close_connections(clients_scheduling);
     close_connections(clients_processing);
-    close_connections(clients_writing);
     stop_server();
     // Don't close timer.
     // It will helps to kill workers with SIGKILL if they not respond.
@@ -75,7 +72,6 @@ void dispatcher::stop() noexcept
         kill_worker(&in_use_workers.front());
     close_buffers(req_bufs);
     close_buffers(resp_bufs);
-    // Don't close in_use_bufs. They used by workers. Wait workers exit.
     worker_args = nullptr;
     worker_name = nullptr;
 }
@@ -86,7 +82,6 @@ void dispatcher::on_loop_exit() noexcept
     close_timer();
     close_buffers(req_bufs);
     close_buffers(resp_bufs);
-    assert(in_use_bufs.empty());
     loop = nullptr;
 }
 
@@ -150,21 +145,19 @@ void dispatcher::stop_server() noexcept
 void dispatcher::spawn_worker() noexcept
 {
     assert(loop);
-    auto on_exit = [](uv_process_t *p, int64_t exit_code, int signal) {
-        worker_process *worker = static_cast<worker_process *>(p);
-        dispatcher *d = reinterpret_cast<dispatcher *>(worker->owner);
-        d->on_worker_exit(worker, exit_code, signal);
-    };
     worker_process *worker = new (std::nothrow) worker_process;
     if (!worker) {
         pruv_log(LOG_ERR, "Not enough memory for worker");
         return;
     }
-    auto deleter = [](void *w) {
-        delete reinterpret_cast<worker_process *>(w);
+    auto delcb = [](void *w) { delete reinterpret_cast<worker_process *>(w); };
+    auto on_exit = [](uv_process_t *p, int64_t exit_code, int signal) {
+        worker_process *worker = static_cast<worker_process *>(p);
+        dispatcher *d = reinterpret_cast<dispatcher *>(worker->owner);
+        d->on_worker_exit(worker, exit_code, signal);
     };
 
-    if (!worker->start(loop, worker_name, worker_args, this, on_exit, deleter))
+    if (!worker->start(loop, worker_name, worker_args, this, on_exit, delcb))
         // deleter will be called sometime later, or already called.
         return;
 
@@ -211,8 +204,8 @@ void dispatcher::kill_worker(worker_process *w) noexcept
 {
     assert(loop);
     assert(!w->empty()); // worker must be in some list
-    // Stop reading pipe to not receive eof.
-    // on_worker_read assumes loop is not null.
+    // Stop reading pipe to not receive eof,
+    // because on_worker_read assumes loop is not null.
     int r;
     if ((r = uv_read_stop((uv_stream_t *)&w->out)) < 0)
         pruv_log_uv_err(LOG_ERR, "uv_read_stop", r);
@@ -226,21 +219,17 @@ void dispatcher::kill_worker(worker_process *w) noexcept
 void dispatcher::on_worker_exit(worker_process *w, int64_t exit_code, int sig)
     noexcept
 {
-    pruv_log(LOG_NOTICE, "Worker %d exited with code %" PRId64 " caused signal %d.",
-            w->pid, exit_code, sig);
+    pruv_log(LOG_NOTICE, "Worker %d exited with code %" PRId64
+            " caused signal %d.", w->pid, exit_code, sig);
     w->exited = true;
     w->remove_from_list();
     if (w->processed_con)
         w->processed_con->remove_from_dispatcher();
     // Buffers may be safely reused only after worker exit.
-    if (w->in_buf) {
-        return_buffer(w->in_buf, true);
-        w->in_buf = nullptr;
-    }
-    if (w->out_buf) {
-        return_buffer(w->out_buf, false);
-        w->out_buf = nullptr;
-    }
+    if (w->in_buf)
+        return_buffer(&w->in_buf, true);
+    if (w->out_buf)
+        return_buffer(&w->out_buf, false);
     w->stop();
     --workers_cnt;
     schedule();
@@ -264,10 +253,18 @@ void dispatcher::on_connection(uv_stream_t *server, int status) noexcept
     };
 
     if (!con->accept(loop, server, this, deleter))
-        // deleter::cb will be called sometime later.
-        return;
+        return; // deleter will be called sometime later.
 
-    if (!con->read_start())
+    auto alloc_cb = [](uv_handle_t *h, size_t size, uv_buf_t *buf) {
+        tcp_context *strm = static_cast<tcp_context *>(tcp_con::from(h));
+        strm->get_dispatcher()->read_con_alloc_cb(strm, size, buf);
+    };
+
+    auto read_cb = [](uv_stream_t *s, ssize_t nread, const uv_buf_t *buf) {
+        tcp_context *strm = static_cast<tcp_context *>(tcp_con::from(s));
+        strm->get_dispatcher()->read_con_cb(strm, nread, buf);
+    };
+    if (!con->read_start(alloc_cb, read_cb))
         return con->remove_from_dispatcher();
 
     move_to(tcp_context::LIST_IDLE, con);
@@ -279,68 +276,51 @@ void dispatcher::read_con_alloc_cb(tcp_context *con, size_t /*suggested_size*/,
     assert(loop);
     *b = uv_buf_init(nullptr, 0);
 
-    if (!con->read_buffer) {
-        // Start new request reading.
-        con->read_buffer = get_buffer(true);
-        if (!con->read_buffer)
-            return;
-        if (!con->prepare_for_request(con->read_buffer))
-            return;
-    }
-    assert(!con->empty()); // Connection can be in one of all lists now.
-    if (con->list_id == tcp_context::LIST_IDLE ||
-        con->list_id == tcp_context::LIST_READING)
-        move_to(tcp_context::LIST_READING, con);
-    else if (con->list_id == tcp_context::LIST_WRITING)
-        // May be client don't read response because it's sending requests now.
-        // Delay sending therefore.
-        move_to(tcp_context::LIST_WRITING, con);
+    // Start new request reading.
+    if (!con->read_buffer && !(con->read_buffer = get_buffer(true)))
+        return;
 
     shmem_buffer_node *sh_buf = con->read_buffer;
     if (!sh_buf->seek(sh_buf->data_size(), REQUEST_CHUNK))
         return;
     *b = uv_buf_init(sh_buf->map_ptr(), sh_buf->map_end() - sh_buf->map_ptr());
-    con->reading_in_buf = true;
 }
 
 void dispatcher::read_con_cb(tcp_context *con, ssize_t nread, const uv_buf_t *)
     noexcept
 {
     assert(loop);
-    con->reading_in_buf = false;
     if (nread < 0) {
-        pruv_log_uv_err(nread == UV_EOF ? LOG_DEBUG : LOG_ERR,
-                "", nread);
-        con->remove_from_dispatcher();
+        pruv_log_uv_err(nread == UV_EOF ? LOG_DEBUG : LOG_ERR, "", nread);
+        return con->remove_from_dispatcher();
     }
     else if (nread > 0) {
         con->read_buffer->set_data_size(con->read_buffer->data_size() + nread);
-        if (!con->validate_request(con->read_buffer))
+        if (!con->parse_request(con->read_buffer))
             return con->remove_from_dispatcher();
 
-        // Parsing allowed only when previous request was processed.
         if (con->list_id == tcp_context::LIST_SCHEDULING ||
             con->list_id == tcp_context::LIST_PROCESSING)
             return;
 
-        if (!con->parse_request(con->read_buffer))
-            return con->remove_from_dispatcher();
-
-        // Fully received message to be processed.
-        if (con->request_size()) {
-            pruv_log(LOG_DEBUG, "Request message parsed (%" PRIuPTR " bytes "
-                    "starting from %" PRIuPTR " byte).",
-                    con->request_size(), con->request_pos());
-            respond_or_enqueue(con);
-            schedule();
-        }
+        move_to(tcp_context::LIST_IO, con);
     }
-    else if (con->request_pos() == con->read_buffer->data_size()) {
+
+    if (con->get_request(con->request)) {
+        // Fully received message to be processed.
+        pruv_log(LOG_DEBUG, "Request message parsed (%" PRIuPTR " bytes "
+                "starting from %" PRIuPTR " byte).",
+                con->request.size, con->request.pos);
+        respond_or_enqueue(con);
+        schedule();
+    }
+    else if (con->request.pos >= con->read_buffer->data_size()) {
         /// There is no not parsed data now.
-        if (!con->worker)
-            return_buffer(con->read_buffer, true);
-        con->read_buffer = nullptr;
-        if (con->list_id == tcp_context::LIST_READING)
+        return_buffer(&con->read_buffer, true);
+        if (!con->parse_request(nullptr))
+            con->remove_from_dispatcher();
+        else if (con->list_id == tcp_context::LIST_IO &&
+                con->resp_buffers.empty())
             move_to(tcp_context::LIST_IDLE, con);
     }
 }
@@ -348,54 +328,31 @@ void dispatcher::read_con_cb(tcp_context *con, ssize_t nread, const uv_buf_t *)
 void dispatcher::respond_or_enqueue(tcp_context *con) noexcept
 {
     assert(con);
-    assert(con->read_buffer);
-    assert(con->request_size());
-    assert(con->list_id == tcp_context::LIST_READING ||
-           con->list_id == tcp_context::LIST_SCHEDULING ||
-           con->list_id == tcp_context::LIST_WRITING);
-    if (con->resp_buffers_num >= RESPONSES_MAXDEPTH)
-        // Don't process new request if responses queue is too large.
-        // It will be done after sending all responses.
-        return move_to(tcp_context::LIST_WRITING, con);
-
-    if (!con->inplace_response(nullptr, nullptr))
+    if (!con->request.inplace)
         return move_to(tcp_context::LIST_SCHEDULING, con);
 
     shmem_buffer_node *buf = get_buffer(false);
-    if (!buf)
+    if (!buf || !con->read_buffer)
         return con->remove_from_dispatcher();
 
-    buf->remove_from_list(); // was in in_use_bufs list
     con->resp_buffers.push_back(buf);
-    ++con->resp_buffers_num;
-    move_to(tcp_context::LIST_WRITING, con);
-    if (!con->inplace_response(con->read_buffer, buf))
+    move_to(tcp_context::LIST_IO, con);
+    if (!con->inplace_response(con->request, *con->read_buffer, *buf))
         return con->remove_from_dispatcher();
 
-    if (!con->reading_in_buf && con->request_pos() + con->request_size() >=
-            con->read_buffer->data_size()) {
-        return_buffer(con->read_buffer, true);
-        con->read_buffer = nullptr;
+    if (con->request.pos + con->request.size >= con->read_buffer->data_size()) {
+        return_buffer(&con->read_buffer, true);
+        if (!con->parse_request(nullptr))
+            return con->remove_from_dispatcher();
     }
-    // Call prepare_for_request() to forget current request because
-    // there is request_size() check in write_con().
-    if (!con->prepare_for_request(con->read_buffer))
-        return con->remove_from_dispatcher();
 
-    if (con->resp_buffers_num == 1)
+    if (&con->resp_buffers.front() == &con->resp_buffers.back()) // One element
         write_con(con);
 }
 
 void dispatcher::schedule() noexcept
 {
     assert(loop);
-    while (!clients_scheduling.empty() &&
-           clients_scheduling.front().inplace_response(nullptr, nullptr)) {
-        tcp_context *con = &clients_scheduling.front();
-        respond_or_enqueue(con);
-        assert(con->empty() || con->list_id == tcp_context::LIST_WRITING);
-    }
-
     if (clients_scheduling.empty() ||
         (workers_cnt >= workers_max && free_workers.empty()))
         return;
@@ -404,8 +361,7 @@ void dispatcher::schedule() noexcept
         spawn_worker();
         if (free_workers.empty()) {
             // Сan't serve any request if spawning worker failed.
-            pruv_log(LOG_ERR, "dispatcher::schedule no worker for request. "
-                "Close connections.");
+            pruv_log(LOG_ERR, "No worker for request. Close connections.");
             return close_connections(clients_scheduling);
         }
     }
@@ -413,12 +369,10 @@ void dispatcher::schedule() noexcept
     shmem_buffer_node * resp_buf = get_buffer(false);
     if (!resp_buf) {
         // Сan't serve any request if opening buffer failed.
-        pruv_log(LOG_ERR, "dispatcher::schedule no buffer for response. "
-                "Close connections.");
+        pruv_log(LOG_ERR, "No buffer for response. Close connections.");
         return close_connections(clients_scheduling);
     }
 
-    tcp_context *con = nullptr;
     // take worker for request
     worker_process &w = free_workers.front();
     assert(w.io_state == worker_process::IO_IDLE);
@@ -426,24 +380,25 @@ void dispatcher::schedule() noexcept
     assert(w.pipe_buf_ptr == w.pipe_buf);
 
     // make request params to send into worker
+    tcp_context *con = nullptr;
     int req_len = 0;
     while (!clients_scheduling.empty()) {
         con = &clients_scheduling.front();
-        assert(con->read_buffer);
-        req_len = snprintf(w.pipe_buf, sizeof(w.pipe_buf),
-            "%s IN SHM %s %" PRIuPTR ", %" PRIuPTR
-            " OUT SHM %s %" PRIuPTR "\n", con->request_protocol(),
-            con->read_buffer->name(), con->request_pos(), con->request_size(),
-            resp_buf->name(), resp_buf->file_size());
-        if (req_len >= 0 && req_len < (int)sizeof(w.pipe_buf))
-            break;
-        pruv_log(LOG_ERR, "dispatcher::schedule can't snprintf request params");
+        if (con->read_buffer) {
+            req_len = snprintf(w.pipe_buf, sizeof(w.pipe_buf),
+                "%s IN SHM %s %" PRIuPTR ", %" PRIuPTR
+                " OUT SHM %s %" PRIuPTR "\n", con->request.protocol,
+                con->read_buffer->name(), con->request.pos, con->request.size,
+                resp_buf->name(), resp_buf->file_size());
+            if (req_len >= 0 && req_len < (int)sizeof(w.pipe_buf))
+                break;
+        }
+        pruv_log(LOG_ERR, "Can't snprintf request params");
         con->remove_from_dispatcher();
         con = nullptr;
     }
     if (!con)
-        return return_buffer(resp_buf, false);
-    assert(con->request_size());
+        return return_buffer(&resp_buf, false);
 
     // Connect request and worker.
     w.remove_from_list();
@@ -462,13 +417,12 @@ void dispatcher::schedule() noexcept
         worker_process *w = reinterpret_cast<worker_process *>(req->data);
         dispatcher *d = reinterpret_cast<dispatcher *>(w->owner);
         if (status != 0) {
-            pruv_log_uv_err(LOG_ERR, "", status);
+            pruv_log_uv_err(LOG_ERR, "write_cb", status);
             if (w->processed_con)
                 w->processed_con->remove_from_dispatcher();
             return d->kill_worker(w);
         }
-        pruv_log(LOG_DEBUG, "dispatcher::schedule cb::write request sent to"
-                " worker");
+        pruv_log(LOG_DEBUG, "request sent to worker");
         assert(w->io_state == worker_process::IO_WRITE);
         // Before writing pipe_buf_ptr was at start. Writing don't move it.
         assert(w->pipe_buf_ptr == w->pipe_buf);
@@ -535,29 +489,21 @@ void dispatcher::on_worker_read(worker_process *w, ssize_t nread,
         assert(con->list_id == tcp_context::LIST_PROCESSING);
 
         assert(!con->read_buffer || con->read_buffer == w->in_buf);
-        if (con->read_buffer && !con->reading_in_buf &&
-            con->request_pos() + con->request_size() >=
-                w->in_buf->data_size()) {
-            return_buffer(con->read_buffer, true);
-            con->read_buffer = nullptr;
-        }
+        if (con->read_buffer &&
+            con->request.pos + con->request.size >= w->in_buf->data_size())
+            return_buffer(&con->read_buffer, true);
         w->in_buf = nullptr;
 
         assert(!w->out_buf->cur_pos());
         assert(w->out_buf->map_ptr() != w->out_buf->map_end());
-        assert(!w->out_buf->empty()); // Was in in_use_bufs list.
         w->out_buf->set_data_size(resp_len);
-        w->out_buf->remove_from_list();
         con->resp_buffers.push_back(w->out_buf);
-        ++con->resp_buffers_num;
         w->out_buf = nullptr;
     }
     else {
         // Connection was closed before worker processing finished.
-        return_buffer(w->in_buf, true);
-        w->in_buf = nullptr;
-        return_buffer(w->out_buf, false);
-        w->out_buf = nullptr;
+        return_buffer(&w->in_buf, true);
+        return_buffer(&w->out_buf, false);
     }
 
     w->io_state = worker_process::IO_IDLE;
@@ -567,25 +513,25 @@ void dispatcher::on_worker_read(worker_process *w, ssize_t nread,
 
     if (con) {
         // May be some part of new request was readed with previous one (but
-        // not parsed yet). If so parse it. Else simply reset request_size().
-        if (!con->prepare_for_request(con->read_buffer))
-            con->remove_from_dispatcher();
-        else {
-            // If resp_buffers_num becames 1 now then writing not started yet.
-            // If resp_buffers_num > 1 then writing of some other buffer already
-            // in progress. Start writing only after prepare_for_request(),
-            // because when writing finishes there is request_size() check.
-            // move_to LIST_WRITING because if do so and response is of zero
-            // size then write_con() can move connection to LIST_READ/LIST_IDLE.
-            move_to(tcp_context::LIST_WRITING, con);
-            if (con->resp_buffers_num == 1)
+        // not parsed yet). If so parse it.
+        if (con->response_ready(con->request, con->resp_buffers.back()) &&
+            con->parse_request(con->read_buffer)) {
+            // If resp_buffers size becames 1 now then writing not started yet.
+            // If resp_buffers size > 1 then writing of some other buffer
+            // already in progress.
+            // move_to LIST_IO because if do so and response is of zero
+            // size then write_con() can move connection to LIST_IDLE.
+            move_to(tcp_context::LIST_IO, con);
+            if (&con->resp_buffers.front() == &con->resp_buffers.back())
                 write_con(con);
-            if (con->read_buffer && con->request_size())
+            if (con->get_request(con->request))
                 // With previous request the second request was fully readed too
-                // and was parsed in prepare_for_request().
+                // and was parsed in parse_request().
                 // Process it now or when responses queue will become empty.
                 respond_or_enqueue(con);
         }
+        else
+            con->remove_from_dispatcher();
     }
     schedule();
 }
@@ -595,9 +541,6 @@ void dispatcher::write_con(tcp_context *con) noexcept
     assert(loop);
     assert(!con->resp_buffers.empty());
     shmem_buffer_node *buf = &con->resp_buffers.front();
-    // initialize for response before first chunk of data
-    if (!buf->cur_pos() && !con->prepare_for_response())
-        return con->remove_from_dispatcher();
 
     if (buf->cur_pos() >= buf->data_size())
         return on_end_write_con(con);
@@ -606,11 +549,9 @@ void dispatcher::write_con(tcp_context *con) noexcept
     // Writing response for one response and scheduling/processing the second
     // response can be at the same time. In this case connection is in
     // LIST_SCHEDULING/LIST_PROCESSING.
-    assert(con->list_id == tcp_context::LIST_SCHEDULING ||
-           con->list_id == tcp_context::LIST_PROCESSING ||
-           con->list_id == tcp_context::LIST_WRITING);
-    if (con->list_id == tcp_context::LIST_WRITING)
-        move_to(tcp_context::LIST_WRITING, con);
+    assert(con->list_id != tcp_context::LIST_IDLE);
+    if (con->list_id == tcp_context::LIST_IO)
+        move_to(tcp_context::LIST_IO, con);
 
     if (buf->map_ptr() == buf->map_end()) {
         // Mapped chunk was fully written. Map next chunk.
@@ -620,7 +561,7 @@ void dispatcher::write_con(tcp_context *con) noexcept
             return con->remove_from_dispatcher();
     }
 
-    if (!con->parse_response(buf))
+    if (!con->parse_response(*buf))
         return con->remove_from_dispatcher();
 
     size_t chunk_size = std::min(size_t(buf->map_end() - buf->map_ptr()),
@@ -629,7 +570,7 @@ void dispatcher::write_con(tcp_context *con) noexcept
     auto write_cb = [](uv_write_t *req, int status) {
         tcp_context *con = static_cast<tcp_context *>(
                 tcp_con::from(req->handle));
-        if (!con->resp_buffers_num)
+        if (con->resp_buffers.empty())
             // Connection was closed and buffers was returned to pool.
             return;
         size_t chunk_size = (size_t)req->data;
@@ -656,45 +597,36 @@ void dispatcher::write_con(tcp_context *con) noexcept
 void dispatcher::on_end_write_con(tcp_context *con) noexcept
 {
     assert(loop);
+    assert(con->list_id != tcp_context::LIST_IDLE);
     pruv_log(LOG_DEBUG, "Response sended");
-    if (con->finish_response()) {
-        return_buffer(&con->resp_buffers.front(), false);
-        --con->resp_buffers_num;
-
-        assert(con->list_id == tcp_context::LIST_SCHEDULING ||
-               con->list_id == tcp_context::LIST_PROCESSING ||
-               con->list_id == tcp_context::LIST_WRITING);
+    if (con->finish_response(con->resp_buffers.front()) &&
+        con->parse_request(con->read_buffer)) {
+        return_buffer(con->resp_buffers.front(), false);
         if (!con->resp_buffers.empty())
             write_con(con);
-        else if (con->list_id == tcp_context::LIST_WRITING) {
+        else if (con->list_id == tcp_context::LIST_IO) {
             // Connection not scheduled nor processed now.
             // Therefore it's available to schedule it
-
-            if (con->read_buffer && con->request_size()) {
+            if (con->get_request(con->request)) {
                 // Connection has fully readed request message but it's not in
-                // scheduling or processing list. It's because of schedule()
-                // wasn't called because of resp_buffers list was too large.
-                // Now resp_buffers list is empty, so call schedule() here.
+                // scheduling or processing list. It's because finish_response()
+                // has made new request available.
                 respond_or_enqueue(con);
                 schedule();
             }
-            else {
-                if (con->read_buffer)
-                    // Connection has partially readed message.
-                    move_to(tcp_context::LIST_READING, con);
-                else
-                    // Connection is inactive.
-                    move_to(tcp_context::LIST_IDLE, con);
-                // There is no fully parsed request now.
-                // Ignore this call or start reading here if it was stopped.
-                if (!con->prepare_for_request(con->read_buffer))
-                    con->remove_from_dispatcher();
-            }
+            else if (con->read_buffer)
+                // Connection has partially readed message.
+                move_to(tcp_context::LIST_IO, con);
+            else
+                // Connection is inactive.
+                move_to(tcp_context::LIST_IDLE, con);
         }
     }
     else
         con->remove_from_dispatcher();
 }
+
+constexpr const char * dispatcher::tcp_context::list_names[];
 
 void dispatcher::move_to(tcp_context::list_id_enum dst, tcp_context *con)
     noexcept
@@ -703,31 +635,20 @@ void dispatcher::move_to(tcp_context::list_id_enum dst, tcp_context *con)
     if (!con->empty())
         con->remove_from_list();
     con->list_id = dst;
-    const char *dst_name = "";
-    if (dst == tcp_context::LIST_IDLE) {
+    if (dst == tcp_context::LIST_IO) {
+        con->timeout = uv_now(loop) + IO_TIMEOUT;
+        clients_io.push_back(con);
+    }
+    else if (dst == tcp_context::LIST_SCHEDULING)
+        clients_scheduling.push_back(con);
+    else if (dst == tcp_context::LIST_PROCESSING)
+        clients_processing.push_back(con);
+    else if (dst == tcp_context::LIST_IDLE) {
         con->timeout = uv_now(loop) + IDLE_TIMEOUT;
         clients_idle.push_back(con);
-        dst_name = "LIST_IDLE";
     }
-    else if (dst == tcp_context::LIST_READING) {
-        con->timeout = uv_now(loop) + READ_TIMEOUT;
-        clients_reading.push_back(con);
-        dst_name = "LIST_READING";
-    }
-    else if (dst == tcp_context::LIST_SCHEDULING) {
-        clients_scheduling.push_back(con);
-        dst_name = "LIST_SCHEDULING";
-    }
-    else if (dst == tcp_context::LIST_PROCESSING) {
-        clients_processing.push_back(con);
-        dst_name = "LIST_PROCESSING";
-    }
-    else if (dst == tcp_context::LIST_WRITING) {
-        con->timeout = uv_now(loop) + WRITE_TIMEOUT;
-        clients_writing.push_back(con);
-        dst_name = "LIST_WRITING";
-    }
-    pruv_log(LOG_DEBUG, "Connection moved to list %s", dst_name);
+    pruv_log(LOG_DEBUG, "Connection moved to list %s",
+            tcp_context::list_names[dst]);
 }
 
 dispatcher::shmem_buffer_node *
@@ -740,41 +661,44 @@ dispatcher::get_buffer(bool for_request) noexcept
         buf->remove_from_list();
         assert(buf->data_size() == 0);
         assert(!buf->cur_pos());
-        in_use_bufs.push_front(buf);
         return buf;
     }
 
-    shmem_buffer_node *buf = new (std::nothrow) shmem_buffer_node;
+    scoped_ptr<shmem_buffer_node> buf(new (std::nothrow) shmem_buffer_node);
     if (!buf) {
         pruv_log(LOG_ERR, "No memory for shmem_buffer_node");
         return nullptr;
     }
-    if (!buf->open(nullptr, true)) {
-        delete buf;
+    if (!buf->open(nullptr, true))
         return nullptr;
-    }
     if (!buf->reset_defaults(for_request ? REQUEST_CHUNK : RESPONSE_CHUNK)) {
         buf->close();
-        delete buf;
         return nullptr;
     }
     buf->set_data_size(0);
-    in_use_bufs.push_front(buf);
-    return buf;
+    return buf.release();
 }
 
-void dispatcher::return_buffer(shmem_buffer_node *buf, bool for_request)
+void dispatcher::return_buffer(shmem_buffer_node &buf, bool for_request)
     noexcept
 {
-    buf->remove_from_list(); // was in in_use_bufs or connection's resp_buffers
-    if (!buf->reset_defaults(for_request ? REQUEST_CHUNK : RESPONSE_CHUNK)) {
-        buf->close();
-        delete buf;
+    if (!buf.empty())
+        buf.remove_from_list();
+    if (!buf.reset_defaults(for_request ? REQUEST_CHUNK : RESPONSE_CHUNK)) {
+        buf.close();
+        delete &buf;
         return;
     }
-    assert(!buf->cur_pos()); // after reset_defaults
-    buf->set_data_size(0);
-    (for_request ? req_bufs : resp_bufs).push_front(buf);
+    assert(!buf.cur_pos()); // after reset_defaults
+    buf.set_data_size(0);
+    (for_request ? req_bufs : resp_bufs).push_front(&buf);
+}
+
+void dispatcher::return_buffer(shmem_buffer_node **buf, bool for_request)
+    noexcept
+{
+    return_buffer(**buf, for_request);
+    *buf = nullptr;
 }
 
 void dispatcher::close_buffers(list_node<shmem_buffer_node> &buf_list) noexcept
@@ -811,7 +735,6 @@ bool dispatcher::start_timer() noexcept
     }
 
     uv_unref((uv_handle_t *)&timer);
-
     close_timer.h = nullptr;
     return true;
 }
@@ -842,8 +765,7 @@ void dispatcher::on_timer_tick() noexcept
     while (!in_use_workers.empty() && in_use_workers.front().timeout <= now)
         kill_worker(&in_use_workers.front());
     close_old_connections(clients_idle);
-    close_old_connections(clients_reading);
-    close_old_connections(clients_writing);
+    close_old_connections(clients_io);
 }
 
 void dispatcher::close_connections(list_node<tcp_context> &list) noexcept
@@ -872,52 +794,17 @@ dispatcher * dispatcher::tcp_context::get_dispatcher() const noexcept
 void dispatcher::tcp_context::remove_from_dispatcher() noexcept
 {
     while (!resp_buffers.empty())
-        get_dispatcher()->return_buffer(&resp_buffers.front(), false);
-    resp_buffers_num = 0;
+        get_dispatcher()->return_buffer(resp_buffers.front(), false);
 
     if (worker)
         worker->processed_con = nullptr;
     else if (read_buffer)
-        get_dispatcher()->return_buffer(read_buffer, true);
-    read_buffer = nullptr;
+        get_dispatcher()->return_buffer(&read_buffer, true);
 
     if (!empty()) // may be not in any list (for example, in schedule)
         remove_from_list();
     close();
     pruv_log(LOG_DEBUG, "Connection closed.");
-}
-
-bool dispatcher::tcp_context::read_start() noexcept
-{
-    auto alloc_cb = [](uv_handle_t *h, size_t size, uv_buf_t *buf) {
-        tcp_context *strm = static_cast<tcp_context *>(tcp_con::from(h));
-        strm->get_dispatcher()->read_con_alloc_cb(strm, size, buf);
-    };
-
-    auto read_cb = [](uv_stream_t *s, ssize_t nread, const uv_buf_t *buf) {
-        tcp_context *strm = static_cast<tcp_context *>(tcp_con::from(s));
-        strm->get_dispatcher()->read_con_cb(strm, nread, buf);
-    };
-
-    // Start connection reading.
-    int r = uv_read_start(base<uv_stream_t *>(), alloc_cb, read_cb);
-    if (r < 0) {
-        pruv_log_uv_err(LOG_ERR, "uv_read_start", r);
-        return false;
-    }
-    pruv_log(LOG_DEBUG, "reading connection begin");
-    return true;
-}
-
-bool dispatcher::tcp_context::read_stop() noexcept
-{
-    int r = uv_read_stop(base<uv_stream_t *>());
-    if (r < 0) {
-        pruv_log_uv_err(LOG_ERR, "uv_read_stop", r);
-        return false;
-    }
-    pruv_log(LOG_DEBUG, "Reading connection end");
-    return true;
 }
 
 } // namespace pruv

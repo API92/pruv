@@ -19,45 +19,28 @@ struct test_context : common_dispatcher<test_context>::tcp_context {
     size_t exp_req_len = 0;
     size_t exp_resp_len = 0;
     size_t resp_len = 0;
-    int cnt = 0;
     bool req_end = false;
+    bool wait_response = false;
     bool keep_alive = true;
 
-    virtual bool prepare_for_request(shmem_buffer *buf) noexcept override;
-    virtual bool validate_request(const shmem_buffer *buf) const noexcept
-        override;
     virtual bool parse_request(shmem_buffer *buf) noexcept override;
-    virtual size_t request_size() const noexcept override;
-    virtual size_t request_pos() const noexcept override;
-    virtual const char * request_protocol() const noexcept override;
-    virtual bool inplace_response(shmem_buffer *buf_in,
-            shmem_buffer *buf_out) noexcept override;
-    virtual bool prepare_for_response() noexcept override;
-    virtual bool parse_response(shmem_buffer *buf) noexcept override;
-    virtual bool finish_response() noexcept override;
+    virtual bool get_request(request_meta &r) noexcept override;
+    virtual bool inplace_response(const request_meta &r,
+            shmem_buffer &buf_in, shmem_buffer &buf_out) noexcept override;
+
+    virtual bool response_ready(const request_meta &r,
+            const shmem_buffer &resp_buf) noexcept override;
+    virtual bool parse_response(shmem_buffer &buf) noexcept override;
+    virtual bool finish_response(const shmem_buffer &buf) noexcept override;
 };
-
-bool test_context::prepare_for_request(shmem_buffer *buf) noexcept
-{
-    if (!buf)
-        return true;
-    EXPECT_FALSE(req_end);
-    req_end = false;
-    ++cnt;
-    if (!keep_alive)
-        EXPECT_EQ(1, cnt);
-    EXPECT_EQ(0, buf->cur_pos());
-    return true;
-}
-
-bool test_context::validate_request(const shmem_buffer *buf) const noexcept
-{
-    EXPECT_GE(exp_req_len, buf->data_size());
-    return true;
-}
 
 bool test_context::parse_request(shmem_buffer *buf) noexcept
 {
+    if (!buf)
+        return true;
+    EXPECT_EQ(req_end, wait_response);
+    if (req_end)
+        return true;
     EXPECT_GE(exp_req_len, buf->data_size());
     req_end = (buf->data_size() == exp_req_len);
     if (!buf->map_offset() && buf->data_size() >= 2 * sizeof(size_t))
@@ -65,32 +48,31 @@ bool test_context::parse_request(shmem_buffer *buf) noexcept
     return true;
 }
 
-size_t test_context::request_size() const noexcept
+bool test_context::get_request(request_meta &r) noexcept
 {
-    return req_end ? exp_req_len : 0;
+    r.pos = 0;
+    r.size = exp_req_len;
+    r.protocol = "HTTP";
+    r.inplace = false;
+    if (req_end) {
+        if (wait_response)
+            return false;
+        wait_response = true;
+        return true;
+    }
+    else
+        return false;
 }
 
-size_t test_context::request_pos() const noexcept
+bool test_context::inplace_response(const request_meta &,
+        shmem_buffer &, shmem_buffer &) noexcept
 {
-    EXPECT_TRUE(req_end);
-    return 0;
-}
-
-const char * test_context::request_protocol() const noexcept
-{
-    return "HTTP";
-}
-
-bool test_context::inplace_response(shmem_buffer *buf_in, shmem_buffer *buf_out)
-    noexcept
-{
-    EXPECT_EQ(nullptr, buf_in);
-    EXPECT_EQ(nullptr, buf_out);
-    EXPECT_TRUE(req_end);
+    EXPECT_TRUE(false);
     return false;
 }
 
-bool test_context::prepare_for_response() noexcept
+bool test_context::response_ready(const request_meta &r,
+        const shmem_buffer &resp_buf) noexcept
 {
     EXPECT_TRUE(req_end);
     EXPECT_EQ(0, resp_len);
@@ -98,19 +80,19 @@ bool test_context::prepare_for_response() noexcept
     return true;
 }
 
-bool test_context::parse_response(shmem_buffer *buf) noexcept
+bool test_context::parse_response(shmem_buffer &buf) noexcept
 {
-    EXPECT_LT(resp_len, buf->data_size());
-    resp_len = std::min(buf->data_size(),
-            resp_len + size_t(buf->map_end() - buf->map_ptr()));
+    EXPECT_LT(resp_len, buf.data_size());
+    resp_len = std::min(buf.data_size(),
+            resp_len + size_t(buf.map_end() - buf.map_ptr()));
     EXPECT_GE(exp_resp_len, resp_len);
     return true;
 }
 
-bool test_context::finish_response() noexcept
+bool test_context::finish_response(const shmem_buffer &) noexcept
 {
     EXPECT_EQ(resp_len, exp_resp_len);
-    req_end = false;
+    req_end = wait_response = false;
     resp_len = 0;
     return keep_alive;
 }

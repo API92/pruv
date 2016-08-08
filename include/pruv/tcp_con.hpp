@@ -17,6 +17,9 @@ public:
     bool set_tcp_keepalive(int enable, unsigned delay, unsigned interval,
             unsigned cnt) noexcept;
 
+    bool read_start(uv_alloc_cb alloc_cb, uv_read_cb read_cb) noexcept;
+    bool read_stop() noexcept;
+
     template<typename T>
     T base() { return reinterpret_cast<T>(this); }
 

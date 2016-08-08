@@ -23,22 +23,16 @@ void http_dispatcher::free_connection(tcp_context *con) noexcept
     delete con;
 }
 
-bool http_dispatcher::tcp_http_context::prepare_for_request(shmem_buffer *buf)
-    noexcept
+http_dispatcher::tcp_http_context::tcp_http_context() noexcept
 {
-    if (req_end)
-        return !buf; // Protection from pipelining. Reset it after response end.
-    assert(!request_len);
+    prepare_for_request();
+}
+
+void http_dispatcher::tcp_http_context::prepare_for_request() noexcept
+{
     http_parser_init(&parser, HTTP_REQUEST);
     request_len = 0;
     req_end = false;
-    return true;
-}
-
-bool http_dispatcher::tcp_http_context::validate_request(const shmem_buffer *)
-    const noexcept
-{
-    return true;
 }
 
 bool http_dispatcher::tcp_http_context::parse_request(shmem_buffer *buf)
@@ -47,18 +41,17 @@ bool http_dispatcher::tcp_http_context::parse_request(shmem_buffer *buf)
     assert(buf);
     if (req_end) // Protection from pipelining. Reset it after sending response.
         return false;
+    if (!buf)
+        return true;
     parser.data = &req_end;
     http_parser_settings settings;
     memset(&settings, 0, sizeof(settings));
-    struct cb {
-        static int on_msg_compl(http_parser *parser) {
-            *reinterpret_cast<bool *>(parser->data) = true;
-            // Returning 1 stops parsing after message end.
-            // It needed to detect new message after end of this message.
-            return 1;
-        }
+    settings.on_message_complete = [](http_parser *parser) {
+        *reinterpret_cast<bool *>(parser->data) = true;
+        // Returning 1 stops parsing after message end.
+        // It needed to detect new message after end of this message.
+        return 1;
     };
-    settings.on_message_complete = cb::on_msg_compl;
     buf->seek(request_len, REQUEST_CHUNK);
     size_t len = buf->data_size() - buf->cur_pos();
     size_t nparsed = http_parser_execute(&parser, &settings,
@@ -77,31 +70,23 @@ bool http_dispatcher::tcp_http_context::parse_request(shmem_buffer *buf)
     return true;
 }
 
-size_t http_dispatcher::tcp_http_context::request_size() const noexcept
+bool http_dispatcher::tcp_http_context::get_request(request_meta &r) noexcept
 {
-    return req_end ? request_len : 0;
+    r.pos = 0;
+    r.size = request_len;
+    r.inplace = false;
+    r.protocol = "HTTP";
+    return req_end;
 }
 
-size_t http_dispatcher::tcp_http_context::request_pos() const noexcept
+bool http_dispatcher::tcp_http_context::inplace_response(const request_meta &,
+        shmem_buffer &, shmem_buffer &) noexcept
 {
-    return 0;
-}
-
-const char * http_dispatcher::tcp_http_context::request_protocol() const
-    noexcept
-{
-    return "HTTP";
-}
-
-bool http_dispatcher::tcp_http_context::inplace_response(shmem_buffer *buf_in,
-        shmem_buffer *buf_out) noexcept
-{
-    assert(!buf_in);
-    assert(!buf_out);
     return false;
 }
 
-bool http_dispatcher::tcp_http_context::prepare_for_response() noexcept
+bool http_dispatcher::tcp_http_context::response_ready(const request_meta &,
+        const shmem_buffer &resp_buf) noexcept
 {
     assert(req_end);
     // Initialize response parser before first chunk of data.
@@ -110,34 +95,31 @@ bool http_dispatcher::tcp_http_context::prepare_for_response() noexcept
     return true;
 }
 
-bool http_dispatcher::tcp_http_context::parse_response(shmem_buffer *buf)
+bool http_dispatcher::tcp_http_context::parse_response(shmem_buffer &buf)
     noexcept
 {
-    assert(buf);
     assert(req_end);
     http_parser_settings parser_settings;
     memset(&parser_settings, 0, sizeof(parser_settings));
     parser.data = &keep_alive;
-    struct parser_cb {
-        static int on_hdrs_end(http_parser *parser) {
-            *reinterpret_cast<bool *>(parser->data) =
-                http_should_keep_alive(parser);
-            // Returning 1 needed to stop parsing after headers complete.
-            return 1;
-        }
+    
+    parser_settings.on_headers_complete = [](http_parser *parser) {
+        *reinterpret_cast<bool *>(parser->data) =
+            http_should_keep_alive(parser);
+        // Returning 1 needed to stop parsing after headers complete.
+        return 1;
     };
-    parser_settings.on_headers_complete = parser_cb::on_hdrs_end;
-    size_t len = std::min(size_t(buf->map_end() - buf->map_ptr()),
-                buf->data_size() - buf->cur_pos());
-    http_parser_execute(&parser, &parser_settings, buf->map_ptr(), len);
+    size_t len = std::min(size_t(buf.map_end() - buf.map_ptr()),
+                buf.data_size() - buf.cur_pos());
+    http_parser_execute(&parser, &parser_settings, buf.map_ptr(), len);
     return true;
 }
 
-bool http_dispatcher::tcp_http_context::finish_response() noexcept
+bool http_dispatcher::tcp_http_context::finish_response(const shmem_buffer &)
+    noexcept
 {
     // After end of response we can read next request.
-    req_end = false;
-    request_len = 0;
+    prepare_for_request();
     return keep_alive;
 }
 

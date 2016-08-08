@@ -18,7 +18,7 @@
 namespace pruv {
 namespace {
 
-bool generate_response(char *request, size_t req_len, shmem_buffer *resp)
+bool generate_response(char *request, size_t req_len, shmem_buffer &resp)
 {
     if (req_len < sizeof(size_t) + 1) {
         pruv_log(LOG_ERR, "Request is too small");
@@ -32,19 +32,19 @@ bool generate_response(char *request, size_t req_len, shmem_buffer *resp)
     bool keep_alive = request[sizeof(size_t)];
     size_t resp_body_len = 2 * body_len;
     size_t resp_len = sizeof(size_t) + 1 + resp_body_len;
-    if (!resp->reset_defaults(resp_len))
+    if (!resp.reset_defaults(resp_len))
         return false;
-    resp->set_data_size(resp_len);
-    memcpy(resp->map_ptr(), &resp_body_len, sizeof(resp_body_len));
-    resp->move_ptr(sizeof(resp_body_len));
-    *resp->map_ptr() = keep_alive;
-    resp->move_ptr(1);
+    resp.set_data_size(resp_len);
+    memcpy(resp.map_ptr(), &resp_body_len, sizeof(resp_body_len));
+    resp.move_ptr(sizeof(resp_body_len));
+    *resp.map_ptr() = keep_alive;
+    resp.move_ptr(1);
 
     char *cp = request + sizeof(size_t) + 1;
     for (size_t i = 0; i < body_len; ++i, ++cp) {
-        *resp->map_ptr() = *std::prev(resp->map_ptr()) ^ *cp;
-        *std::next(resp->map_ptr()) = *cp;
-        resp->move_ptr(2);
+        *resp.map_ptr() = *std::prev(resp.map_ptr()) ^ *cp;
+        *std::next(resp.map_ptr()) = *cp;
+        resp.move_ptr(2);
     }
     return true;
 }
@@ -52,53 +52,37 @@ bool generate_response(char *request, size_t req_len, shmem_buffer *resp)
 struct pipeline_context : common_dispatcher<pipeline_context>::tcp_context {
     pipeline_context(bool inplace) : inplace(inplace) {}
 
-    virtual bool prepare_for_request(shmem_buffer *buf) noexcept override;
-    virtual bool validate_request(const shmem_buffer *buf) const noexcept
-        override;
     virtual bool parse_request(shmem_buffer *buf) noexcept override;
-    virtual size_t request_size() const noexcept override;
-    virtual size_t request_pos() const noexcept override;
-    virtual const char * request_protocol() const noexcept override;
-    virtual bool inplace_response(shmem_buffer *buf_in,
-            shmem_buffer *buf_out) noexcept override;
-    virtual bool prepare_for_response() noexcept override;
-    virtual bool parse_response(shmem_buffer *buf) noexcept override;
-    virtual bool finish_response() noexcept override;
+    virtual bool get_request(request_meta &r) noexcept override;
+    virtual bool inplace_response(const request_meta &r,
+            shmem_buffer &buf_in, shmem_buffer &buf_out) noexcept override;
 
-    size_t request_pos_ = 0;
+    virtual bool response_ready(const request_meta &r,
+            const shmem_buffer &resp_buf) noexcept override;
+    virtual bool parse_response(shmem_buffer &buf) noexcept override;
+    virtual bool finish_response(const shmem_buffer &buf) noexcept override;
+
+    size_t request_pos = 0;
     size_t request_len = 0;
     size_t body_len = 0;
 
     bool inplace;
-    bool req_end = true;
+    bool req_end = false;
+    bool wait_response = false;
     bool keep_alive;
 };
 
-bool pipeline_context::validate_request(const shmem_buffer *buf) const noexcept
-{
-    return buf->data_size() < 1024 * 1024;
-}
-
-bool pipeline_context::prepare_for_request(shmem_buffer *buf) noexcept
-{
-    if (!req_end)
-        return true; // from on_end_write_con()
-    request_pos_ += request_len; // Skip previous request.
-    request_len = 0;
-    req_end = false;
-    if (!buf) {
-        request_pos_ = 0;
-        return true;
-    }
-    return parse_request(buf);
-}
-
 bool pipeline_context::parse_request(shmem_buffer *buf) noexcept
 {
-    EXPECT_FALSE(req_end);
+    if (!buf) {
+        request_pos = request_len = 0;
+        return true;
+    }
+    if (req_end)
+        return true;
 
-    while (!req_end && request_pos_ + request_len < buf->data_size()) {
-        if (!buf->seek(request_pos_ + request_len, REQUEST_CHUNK))
+    while (!req_end && request_pos + request_len < buf->data_size()) {
+        if (!buf->seek(request_pos + request_len, REQUEST_CHUNK))
             return false;
         if (request_len < sizeof(body_len)) {
             reinterpret_cast<char *>(&body_len)[request_len] = *buf->map_ptr();
@@ -114,64 +98,69 @@ bool pipeline_context::parse_request(shmem_buffer *buf) noexcept
     return true;
 }
 
-size_t pipeline_context::request_size() const noexcept
+bool pipeline_context::get_request(request_meta &r) noexcept
 {
-    return req_end ? request_len : 0;
+    r.pos = request_pos;
+    r.size = request_len;
+    r.protocol = "TEST";
+    r.inplace = inplace;
+    if (req_end) {
+        if (wait_response)
+            return false;
+        else {
+            request_pos += request_len;
+            request_len = 0;
+            wait_response = true;
+            return true;
+        }
+    }
+    else
+        return false;
 }
 
-size_t pipeline_context::request_pos() const noexcept
+bool pipeline_context::inplace_response(const request_meta &r,
+        shmem_buffer &buf_in, shmem_buffer &buf_out) noexcept
 {
-    return request_pos_;
-}
-
-const char * pipeline_context::request_protocol() const noexcept
-{
-    return "TEST";
-}
-
-bool pipeline_context::inplace_response(shmem_buffer *buf_in,
-        shmem_buffer *buf_out) noexcept
-{
+    EXPECT_TRUE(inplace);
     EXPECT_TRUE(req_end);
 
     if (inplace) {
-        if (!buf_out)
-            return true;
-        bool map_res = buf_in->map(0, request_pos_ + request_len);
+        bool map_res = buf_in.map(0, r.pos + r.size);
         EXPECT_TRUE(map_res);
         if (!map_res)
             return false;
-        bool gen_res = generate_response(buf_in->map_ptr() + request_pos_,
-                request_len, buf_out);
+        bool gen_res = generate_response(buf_in.map_ptr() + r.pos, r.size,
+                buf_out);
         EXPECT_TRUE(gen_res);
         if (!gen_res)
             return false;
-        bool move_res = buf_out->seek(0, RESPONSE_CHUNK);
+        bool move_res = buf_out.seek(0, RESPONSE_CHUNK);
         EXPECT_TRUE(move_res);
         if (!move_res)
             return false;
+        req_end = wait_response = false;
         return true;
     }
-    else {
-        EXPECT_TRUE(!buf_out);
-        return buf_out;
-    }
+    else
+        return false;
 }
 
-bool pipeline_context::prepare_for_response() noexcept
+bool pipeline_context::response_ready(const request_meta &,
+        const shmem_buffer &) noexcept
 {
     keep_alive = false;
+    req_end = wait_response = false;
     return true;
 }
 
-bool pipeline_context::parse_response(shmem_buffer *buf) noexcept
+bool pipeline_context::parse_response(shmem_buffer &buf) noexcept
 {
-    if (!buf->map_offset())
-        keep_alive = buf->map_begin()[sizeof(size_t)];
+    if (!buf.map_offset())
+        keep_alive = buf.map_begin()[sizeof(size_t)];
     return true;
 }
 
-bool pipeline_context::finish_response() noexcept
+bool pipeline_context::finish_response(const shmem_buffer &buf) noexcept
 {
     return keep_alive;
 }
@@ -287,7 +276,7 @@ struct redundant_worker : public worker_loop {
     virtual int handle_request() noexcept override
     {
         if (!generate_response(get_request(), get_request_len(),
-                    get_response_buf()))
+                    *get_response_buf()))
             return EXIT_FAILURE;
         return send_last_response() ? EXIT_SUCCESS : EXIT_FAILURE;
     }

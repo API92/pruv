@@ -78,4 +78,27 @@ bool tcp_con::set_tcp_keepalive(int enable, unsigned delay, unsigned interval,
     return ret;
 }
 
+bool tcp_con::read_start(uv_alloc_cb alloc_cb, uv_read_cb read_cb) noexcept
+{
+    // Start connection reading.
+    int r = uv_read_start(base<uv_stream_t *>(), alloc_cb, read_cb);
+    if (r < 0) {
+        pruv_log_uv_err(LOG_ERR, "uv_read_start", r);
+        return false;
+    }
+    pruv_log(LOG_DEBUG, "reading connection begin");
+    return true;
+}
+
+bool tcp_con::read_stop() noexcept
+{
+    int r = uv_read_stop(base<uv_stream_t *>());
+    if (r < 0) {
+        pruv_log_uv_err(LOG_ERR, "uv_read_stop", r);
+        return false;
+    }
+    pruv_log(LOG_DEBUG, "Reading connection end");
+    return true;
+}
+
 } // namespace pruv

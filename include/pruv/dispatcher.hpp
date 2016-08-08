@@ -36,52 +36,37 @@ protected:
     class tcp_context : private tcp_con, list_node<tcp_context> {
     public:
         virtual ~tcp_context() {}
+        struct request_meta {
+            size_t pos;
+            size_t size;
+            const char *protocol;
+            bool inplace;
+            request_meta() : pos(0), size(0), protocol(""), inplace(false) {}
+        };
+
     protected:
-        /// Called before reading new message. buf may be nullptr.
-        /// If returns false, connection will be closed.
-        /// It can be used for moving to the begin of buffer those part of
-        /// message which will be readed with previous message at the same
-        /// time (when pipelining used).
-        /// It can be used to pass to the worker some headers from
-        /// PROXY-protocol for every message, not only at connection start.
-        virtual bool prepare_for_request(shmem_buffer *buf) noexcept = 0;
         /// Called after reading data into buffer.
-        /// If returns false, connection will be closed.
-        virtual bool validate_request(const shmem_buffer *buf) const
-            noexcept = 0;
-        /// Called after reading data into buffer when previous request is not
-        /// in processing.
+        /// Also called with nullptr when releasing previous buffer.
         /// If returns false, connection will be closed.
         virtual bool parse_request(shmem_buffer *buf) noexcept = 0;
-        /// Called after request parsing.
-        /// When this returns non zero length, message of this size will be
-        /// passed to the worker.
-        virtual size_t request_size() const noexcept = 0;
-        /// Called before passing request to the worker.
-        /// Returns request offset in the shared memory object.
-        virtual size_t request_pos() const noexcept = 0;
-        /// Returns protocol name for passing to worker.
-        virtual const char * request_protocol() const noexcept = 0;
-        /// If called with buf == nullptr then returns true if inplace response
-        /// can be done else returns false.
-        /// If called with not null buf then makes response in buf and if
-        /// returns false then connection will be closed.
-        virtual bool inplace_response(shmem_buffer *buf_in,
-                shmem_buffer *buf_out) noexcept = 0;
-        /// Called before starting new response message, received from worker.
+        /// Fill r with pos and size of currently parsed request.
+        /// Returns if has fully parsed request and switches to the next one.
+        virtual bool get_request(request_meta &r) noexcept = 0;
+        /// Makes response in buf_out.
         /// If returns false, connection will be closed.
-        virtual bool prepare_for_response() noexcept = 0;
+        virtual bool inplace_response(const request_meta &r,
+                shmem_buffer &buf_in, shmem_buffer &buf_out) noexcept = 0;
+
+        /// Called after response message received from worker.
+        /// If returns false, connection will be closed.
+        virtual bool response_ready(const request_meta &r,
+                const shmem_buffer &resp_buf) noexcept = 0;
         /// Called before sending data currently mapped in the buf.
         /// If returns false, connection will be closed.
-        virtual bool parse_response(shmem_buffer *buf) noexcept = 0;
+        virtual bool parse_response(shmem_buffer &buf) noexcept = 0;
         /// Called after writing last response chunk.
         /// If returns false, connection will be closed.
-        virtual bool finish_response() noexcept = 0;
-
-        /// Start reading connection in loop.
-        bool read_start() noexcept;
-        /// Stop reading connection in loop.
-        bool read_stop() noexcept;
+        virtual bool finish_response(const shmem_buffer &resp_buf) noexcept = 0;
 
     private:
         friend dispatcher;
@@ -100,20 +85,26 @@ protected:
         /// but its result must be ignored. Stored in connection to break
         /// reference worker->processed_con on EOF received.
         worker_process *worker = nullptr;
+        /// Parameters of last processed request
+        request_meta request;
         uv_write_t write_req;
         uint64_t timeout;
-        /// Number of elements in resp_buffers list.
-        unsigned resp_buffers_num = 0;
+
+#define LIST_ID_MAP(XX) \
+        XX(LIST_IDLE) \
+        XX(LIST_IO) \
+        XX(LIST_SCHEDULING) \
+        XX(LIST_PROCESSING)
         enum list_id_enum {
-            LIST_IDLE,
-            LIST_READING,
-            LIST_SCHEDULING,
-            LIST_PROCESSING,
-            LIST_WRITING
+#define XX(x) x,
+            LIST_ID_MAP(XX)
+#undef XX
         } list_id;
-        /// Is true when exists uv_buf_t between alloc and read calbacks
-        /// based on read_buffer.
-        bool reading_in_buf = false;
+        static constexpr const char * list_names[] = {
+#define XX(x) #x,
+            LIST_ID_MAP(XX)
+#undef XX
+        };
     };
 
     /// Allocate connection structure.
@@ -195,10 +186,12 @@ private:
     /// Update connections timeout.
     void move_to(tcp_context::list_id_enum dst, tcp_context *con) noexcept;
 
-    /// Take buffer from cache or create new. Puts buffer into in_use_bufs.
+    /// Take buffer from cache or create new.
     shmem_buffer_node * get_buffer(bool for_request) noexcept;
     /// Return buffer into cache. Remove buffer from its current list.
-    void return_buffer(shmem_buffer_node *buf, bool for_request) noexcept;
+    void return_buffer(shmem_buffer_node &buf, bool for_request) noexcept;
+    /// Return buffer into cache. Remove buffer from its current list. Zero ptr.
+    void return_buffer(shmem_buffer_node **buf, bool for_request) noexcept;
     /// Close all shared memory objects in list and free memory.
     /// Must be called only when there is no references to any buffer
     /// in the buf_list.
@@ -215,12 +208,10 @@ private:
 
 
     static constexpr unsigned IDLE_TIMEOUT = 30'000;
-    static constexpr unsigned READ_TIMEOUT = 10'000;
-    static constexpr unsigned WRITE_TIMEOUT = 15'000;
+    static constexpr unsigned IO_TIMEOUT = 10'000;
     static constexpr unsigned PROCESSING_TIMEOUT = 10'000;
     static constexpr unsigned KILL_TIMEOUT = 10'000;
     static constexpr unsigned TIMER_PERIOD = 5'000;
-    static constexpr unsigned RESPONSES_MAXDEPTH = 10;
 
     uv_loop_t *loop = nullptr;
     const char *worker_name = nullptr;
@@ -233,17 +224,15 @@ private:
 
     /// Connections in this list are inactive.
     list_node<tcp_context> clients_idle;
-    /// Connections in this list are readed (has some not processed data).
-    list_node<tcp_context> clients_reading;
+    /// Connections in this list are readed (has some not processed data)
+    /// or with partially writed response.
+    list_node<tcp_context> clients_io;
     /// Connections with fully read request without worker.
     /// Connections may be readed and writed, but parsing stopped for its.
     list_node<tcp_context> clients_scheduling;
     /// Connections waits response from worker.
     /// Connections may be readed and writed, but parsing stopped for its.
     list_node<tcp_context> clients_processing;
-    /// Connections with partially writed response.
-    /// If connection readed and writed at the same time, it's in this list,
-    list_node<tcp_context> clients_writing;
 
     /// Idle workers without job.
     list_node<worker_process> free_workers;
@@ -256,8 +245,6 @@ private:
     list_node<shmem_buffer_node> req_bufs;
     /// Free buffers for writing response.
     list_node<shmem_buffer_node> resp_bufs;
-    /// Non free buffers.
-    list_node<shmem_buffer_node> in_use_bufs;
 };
 
 } // namespace pruv
