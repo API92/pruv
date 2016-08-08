@@ -27,7 +27,6 @@ dispatcher::~dispatcher()
     assert(!workers_cnt);
     assert(!worker_name);
     assert(!worker_args);
-    assert(uv_is_closing((uv_handle_t *)&tcp_server));
 
     assert(clients_idle.empty());
     assert(clients_io.empty());
@@ -88,8 +87,8 @@ void dispatcher::on_loop_exit() noexcept
 bool dispatcher::start_server(const char *ip, int port) noexcept
 {
     assert(loop);
+    server.base<uv_handle_t *>()->data = this;
     int r;
-    tcp_server.data = this;
 
     sockaddr_in addr4;
     sockaddr_in6 addr6;
@@ -107,38 +106,27 @@ bool dispatcher::start_server(const char *ip, int port) noexcept
     else
         addr = (sockaddr *)&addr4;
 
-    close_on_return close_server((uv_handle_t *)&tcp_server, nullptr);
-    if ((r = uv_tcp_init(loop, &tcp_server)) < 0) {
-        pruv_log_uv_err(LOG_EMERG, "uv_tcp_init", r);
-        return false;
-    }
-
-    if ((r = uv_tcp_bind(&tcp_server, addr, 0)) < 0) {
-        pruv_log_uv_err(LOG_EMERG, "uv_tcp_bind", r);
-        return false;
-    }
-
     auto on_conn = [](uv_stream_t *server, int status) {
         dispatcher *d = reinterpret_cast<dispatcher *>(server->data);
         d->on_connection(server, status);
     };
 
-    if ((r = uv_listen((uv_stream_t *)&tcp_server, 16384, on_conn)) < 0) {
-        pruv_log_uv_err(LOG_EMERG, "uv_listen", r);
+    if (server.init(loop) && server.bind(addr, 0) &&
+        server.listen(16384, on_conn)) {
+        pruv_log(LOG_NOTICE, "Server started at %s:%d", ip, port);
+        return true;
+    }
+    else {
+        server.close(nullptr);
         return false;
     }
-
-    close_server.h = nullptr;
-    pruv_log(LOG_NOTICE, "Server started at %s:%d", ip, port);
-    return true;
 }
 
 void dispatcher::stop_server() noexcept
 {
     // Check if server not closing because stop() called on failed start.
     // If server can't be started, uv_close called in start_server.
-    if (!uv_is_closing((uv_handle_t *)&tcp_server))
-        uv_close((uv_handle_t *)&tcp_server, nullptr);
+    server.close(nullptr);
     pruv_log(LOG_NOTICE, "Server stopped");
 }
 

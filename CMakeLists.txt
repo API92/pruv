@@ -43,6 +43,7 @@ add_library(${PROJECT_NAME}
     include/pruv/shmem_buffer.hpp
     include/pruv/shmem_cache.hpp
     include/pruv/tcp_con.hpp
+    include/pruv/tcp_server.hpp
     include/pruv/termination.hpp
     include/pruv/worker_loop.hpp
     src/dispatcher.cpp
@@ -55,6 +56,7 @@ add_library(${PROJECT_NAME}
     src/shmem_buffer.cpp
     src/shmem_cache.cpp
     src/tcp_con.cpp
+    src/tcp_server.cpp
     src/termination.cpp
     src/worker_loop.cpp
 )

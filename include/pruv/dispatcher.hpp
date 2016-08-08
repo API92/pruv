@@ -12,6 +12,7 @@
 #include <pruv/process.hpp>
 #include <pruv/shmem_buffer.hpp>
 #include <pruv/tcp_con.hpp>
+#include <pruv/tcp_server.hpp>
 
 namespace pruv {
 
@@ -219,7 +220,7 @@ private:
     size_t workers_cnt = 0;
     size_t workers_max = 0;
 
-    uv_tcp_t tcp_server;
+    tcp_server server;
     uv_timer_t timer;
 
     /// Connections in this list are inactive.
