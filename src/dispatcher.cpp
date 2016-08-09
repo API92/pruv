@@ -88,8 +88,12 @@ bool dispatcher::start_server(const char *ip, int port) noexcept
 {
     assert(loop);
     server.base<uv_handle_t *>()->data = this;
-    int r;
+    if (!server.init(loop)) {
+        server.close(nullptr);
+        return false;
+    }
 
+    int r;
     sockaddr_in addr4;
     sockaddr_in6 addr6;
     sockaddr *addr = nullptr;
@@ -111,15 +115,12 @@ bool dispatcher::start_server(const char *ip, int port) noexcept
         d->on_connection(server, status);
     };
 
-    if (server.init(loop) && server.bind(addr, 0) &&
-        server.listen(16384, on_conn)) {
-        pruv_log(LOG_NOTICE, "Server started at %s:%d", ip, port);
-        return true;
-    }
-    else {
+    if (!server.bind(addr, 0) || !server.listen(16384, on_conn)) {
         server.close(nullptr);
         return false;
     }
+    pruv_log(LOG_NOTICE, "Server started at %s:%d", ip, port);
+    return true;
 }
 
 void dispatcher::stop_server() noexcept
