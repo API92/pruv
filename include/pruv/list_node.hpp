@@ -46,6 +46,11 @@ public:
         return next == this;
     }
 
+    bool one_element() const
+    {
+        return next != this && next == prev;
+    }
+
     iterator begin()
     {
         return iterator(next);

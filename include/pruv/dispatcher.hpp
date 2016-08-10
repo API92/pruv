@@ -191,7 +191,7 @@ private:
     shmem_buffer_node * get_buffer(bool for_request) noexcept;
     /// Return buffer into cache. Remove buffer from its current list.
     void return_buffer(shmem_buffer_node &buf, bool for_request) noexcept;
-    /// Return buffer into cache. Remove buffer from its current list. Zero ptr.
+    /// Return buffer into cache. Remove buffer from its current list.
     void return_buffer(shmem_buffer_node **buf, bool for_request) noexcept;
     /// Close all shared memory objects in list and free memory.
     /// Must be called only when there is no references to any buffer

@@ -7,8 +7,6 @@
 #include <algorithm>
 #include <cassert>
 #include <inttypes.h>
-#include <memory.h>
-#include <string>
 
 #include <unistd.h>
 
@@ -125,8 +123,6 @@ bool dispatcher::start_server(const char *ip, int port) noexcept
 
 void dispatcher::stop_server() noexcept
 {
-    // Check if server not closing because stop() called on failed start.
-    // If server can't be started, uv_close called in start_server.
     server.close(nullptr);
     pruv_log(LOG_NOTICE, "Server stopped");
 }
@@ -193,6 +189,8 @@ void dispatcher::kill_worker(worker_process *w) noexcept
 {
     assert(loop);
     assert(!w->empty()); // worker must be in some list
+    if (w->processed_con)
+        w->processed_con->remove_from_dispatcher();
     // Stop reading pipe to not receive eof,
     // because on_worker_read assumes loop is not null.
     int r;
@@ -335,7 +333,7 @@ void dispatcher::respond_or_enqueue(tcp_context *con) noexcept
             return con->remove_from_dispatcher();
     }
 
-    if (&con->resp_buffers.front() == &con->resp_buffers.back()) // One element
+    if (con->resp_buffers.one_element())
         write_con(con);
 }
 
@@ -355,7 +353,7 @@ void dispatcher::schedule() noexcept
         }
     }
 
-    shmem_buffer_node * resp_buf = get_buffer(false);
+    shmem_buffer_node *resp_buf = get_buffer(false);
     if (!resp_buf) {
         // Сan't serve any request if opening buffer failed.
         pruv_log(LOG_ERR, "No buffer for response. Close connections.");
@@ -407,8 +405,6 @@ void dispatcher::schedule() noexcept
         dispatcher *d = reinterpret_cast<dispatcher *>(w->owner);
         if (status != 0) {
             pruv_log_uv_err(LOG_ERR, "write_cb", status);
-            if (w->processed_con)
-                w->processed_con->remove_from_dispatcher();
             return d->kill_worker(w);
         }
         pruv_log(LOG_DEBUG, "request sent to worker");
@@ -425,8 +421,7 @@ void dispatcher::schedule() noexcept
     int r = uv_write(&w.write_req, (uv_stream_t *)&w.in, &buf, 1, write_cb);
     if (r < 0) {
         pruv_log_uv_err(LOG_ERR, "uv_write", r);
-        kill_worker(&w);
-        con->remove_from_dispatcher();
+        kill_worker(&w); // Connection will be closed here too
     }
 }
 
@@ -511,7 +506,7 @@ void dispatcher::on_worker_read(worker_process *w, ssize_t nread,
             // move_to LIST_IO because if do so and response is of zero
             // size then write_con() can move connection to LIST_IDLE.
             move_to(tcp_context::LIST_IO, con);
-            if (&con->resp_buffers.front() == &con->resp_buffers.back())
+            if (con->resp_buffers.one_element())
                 write_con(con);
             if (con->get_request(con->request))
                 // With previous request the second request was fully readed too
@@ -556,17 +551,16 @@ void dispatcher::write_con(tcp_context *con) noexcept
     size_t chunk_size = std::min(size_t(buf->map_end() - buf->map_ptr()),
             buf->data_size() - buf->cur_pos());
 
-    auto write_cb = [](uv_write_t *req, int status) {
-        tcp_context *con = static_cast<tcp_context *>(
-                tcp_con::from(req->handle));
+    auto write_cb = [](uv_write_t *r, int status) {
+        tcp_context *con = static_cast<tcp_context *>(tcp_con::from(r->handle));
         if (con->resp_buffers.empty())
             // Connection was closed and buffers was returned to pool.
             return;
-        size_t chunk_size = (size_t)req->data;
         if (status < 0) {
             pruv_log_uv_err(LOG_ERR, "", status);
             return con->remove_from_dispatcher();
         }
+        size_t chunk_size = (size_t)r->data;
         con->resp_buffers.front().move_ptr(chunk_size);
         pruv_log(LOG_DEBUG, "Response chunk of %" PRIuPTR " bytes written",
                 chunk_size);
@@ -592,24 +586,21 @@ void dispatcher::on_end_write_con(tcp_context *con) noexcept
         con->parse_request(con->read_buffer)) {
         return_buffer(con->resp_buffers.front(), false);
         if (!con->resp_buffers.empty())
-            write_con(con);
-        else if (con->list_id == tcp_context::LIST_IO) {
-            // Connection not scheduled nor processed now.
-            // Therefore it's available to schedule it
-            if (con->get_request(con->request)) {
-                // Connection has fully readed request message but it's not in
-                // scheduling or processing list. It's because finish_response()
-                // has made new request available.
-                respond_or_enqueue(con);
-                schedule();
-            }
-            else if (con->read_buffer)
-                // Connection has partially readed message.
-                move_to(tcp_context::LIST_IO, con);
-            else
-                // Connection is inactive.
-                move_to(tcp_context::LIST_IDLE, con);
+            return write_con(con);
+        if (con->list_id != tcp_context::LIST_IO)
+            return; // Connection scheduled or processed now. Can't ask request.
+        // If new request became available after finish_response() and
+        // parse_request() then now it's allowed to ask it and to schedule it.
+        if (con->get_request(con->request)) {
+            respond_or_enqueue(con);
+            schedule();
         }
+        else if (con->read_buffer)
+            // Connection has partially readed message.
+            move_to(tcp_context::LIST_IO, con);
+        else
+            // Connection is inactive.
+            move_to(tcp_context::LIST_IDLE, con);
     }
     else
         con->remove_from_dispatcher();
@@ -664,7 +655,6 @@ dispatcher::get_buffer(bool for_request) noexcept
         buf->close();
         return nullptr;
     }
-    buf->set_data_size(0);
     return buf.release();
 }
 
@@ -787,7 +777,7 @@ void dispatcher::tcp_context::remove_from_dispatcher() noexcept
 
     if (worker)
         worker->processed_con = nullptr;
-    else if (read_buffer)
+    else if (read_buffer) // Can return buffer only if worker not use it.
         get_dispatcher()->return_buffer(&read_buffer, true);
 
     if (!empty()) // may be not in any list (for example, in schedule)
