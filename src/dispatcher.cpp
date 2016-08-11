@@ -524,6 +524,8 @@ void dispatcher::write_con(tcp_context *con) noexcept
     assert(loop);
     assert(!con->resp_buffers.empty());
     shmem_buffer_node *buf = &con->resp_buffers.front();
+    if (!buf->data_size())
+        return con->remove_from_dispatcher();
 
     if (buf->cur_pos() >= buf->data_size())
         return on_end_write_con(con);
