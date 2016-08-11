@@ -47,7 +47,7 @@ dispatcher::tcp_context * common_dispatcher<ProdT>::create_connection() noexcept
 template<typename ProdT>
 void common_dispatcher<ProdT>::free_connection(tcp_context *con) noexcept
 {
-    products.erase(dynamic_cast<ProdT *>(con));
+    products.erase(reinterpret_cast<ProdT *>(con));
     delete con;
 }
 

@@ -61,6 +61,8 @@ add_library(${PROJECT_NAME}
     src/worker_loop.cpp
 )
 
+target_compile_options(${PROJECT_NAME} PUBLIC -fno-exceptions -fno-rtti)
+
 add_executable(${PROJECT_NAME}d
     daemon/main.cpp
 )
