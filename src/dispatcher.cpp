@@ -281,27 +281,26 @@ void dispatcher::read_con_cb(tcp_context *con, ssize_t nread, const uv_buf_t *)
         pruv_log_uv_err(nread == UV_EOF ? LOG_DEBUG : LOG_ERR, "", nread);
         return con->remove_from_dispatcher();
     }
-    else if (nread > 0) {
-        con->read_buffer->set_data_size(con->read_buffer->data_size() + nread);
-        if (!con->parse_request(con->read_buffer))
-            return con->remove_from_dispatcher();
 
-        if (con->list_id == tcp_context::LIST_SCHEDULING ||
-            con->list_id == tcp_context::LIST_PROCESSING)
-            return;
+    con->read_buffer->set_data_size(con->read_buffer->data_size() + nread);
+    if (!con->parse_request(con->read_buffer))
+        return con->remove_from_dispatcher();
 
+    if (con->list_id == tcp_context::LIST_IDLE ||
+        con->list_id == tcp_context::LIST_IO) {
         move_to(tcp_context::LIST_IO, con);
+        if (con->get_request(con->request)) {
+            // Fully received message to be processed.
+            pruv_log(LOG_DEBUG, "Request message parsed (%" PRIuPTR " bytes "
+                    "starting from %" PRIuPTR " byte).",
+                    con->request.size, con->request.pos);
+            respond_or_enqueue(con);
+            schedule();
+        }
     }
 
-    if (con->get_request(con->request)) {
-        // Fully received message to be processed.
-        pruv_log(LOG_DEBUG, "Request message parsed (%" PRIuPTR " bytes "
-                "starting from %" PRIuPTR " byte).",
-                con->request.size, con->request.pos);
-        respond_or_enqueue(con);
-        schedule();
-    }
-    else if (con->request.pos >= con->read_buffer->data_size()) {
+    if (con->list_id != tcp_context::LIST_SCHEDULING && con->read_buffer &&
+        con->request.pos >= con->read_buffer->data_size()) {
         /// There is no not parsed data now.
         return_buffer(&con->read_buffer, true);
         if (!con->parse_request(nullptr))
