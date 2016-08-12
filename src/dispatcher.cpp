@@ -323,8 +323,10 @@ void dispatcher::respond_or_enqueue(tcp_context *con) noexcept
 
     con->resp_buffers.push_back(buf);
     move_to(tcp_context::LIST_IO, con);
-    if (!con->inplace_response(con->request, *con->read_buffer, *buf))
+    if (!con->inplace_response(con->request, *con->read_buffer, *buf) ||
+        !buf->data_size())
         return con->remove_from_dispatcher();
+
 
     if (con->request.pos + con->request.size >= con->read_buffer->data_size()) {
         return_buffer(&con->read_buffer, true);
@@ -524,9 +526,6 @@ void dispatcher::write_con(tcp_context *con) noexcept
     assert(loop);
     assert(!con->resp_buffers.empty());
     shmem_buffer_node *buf = &con->resp_buffers.front();
-    if (!buf->data_size())
-        return con->remove_from_dispatcher();
-
     if (buf->cur_pos() >= buf->data_size())
         return on_end_write_con(con);
 
