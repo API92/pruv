@@ -239,20 +239,8 @@ void dispatcher::on_connection(uv_stream_t *server, int status) noexcept
         con->get_dispatcher()->free_connection(con);
     };
 
-    if (!con->accept(loop, server, this, deleter))
-        return; // deleter will be called sometime later.
-
-    auto alloc_cb = [](uv_handle_t *h, size_t size, uv_buf_t *buf) {
-        tcp_context *strm = static_cast<tcp_context *>(tcp_con::from(h));
-        strm->get_dispatcher()->read_con_alloc_cb(strm, size, buf);
-    };
-
-    auto read_cb = [](uv_stream_t *s, ssize_t nread, const uv_buf_t *buf) {
-        tcp_context *strm = static_cast<tcp_context *>(tcp_con::from(s));
-        strm->get_dispatcher()->read_con_cb(strm, nread, buf);
-    };
-    if (!con->read_start(alloc_cb, read_cb))
-        return con->remove_from_dispatcher();
+    if (!con->accept(loop, server, this, deleter) || !con->read_start())
+        return con->remove_from_dispatcher(); // deleter will be called later.
 
     move_to(tcp_context::LIST_IDLE, con);
 }
@@ -784,6 +772,19 @@ void dispatcher::tcp_context::remove_from_dispatcher() noexcept
         remove_from_list();
     close();
     pruv_log(LOG_DEBUG, "Connection closed.");
+}
+
+bool dispatcher::tcp_context::read_start()
+{
+    auto alloc_cb = [](uv_handle_t *h, size_t size, uv_buf_t *buf) {
+        tcp_context *strm = static_cast<tcp_context *>(tcp_con::from(h));
+        strm->get_dispatcher()->read_con_alloc_cb(strm, size, buf);
+    };
+    auto read_cb = [](uv_stream_t *s, ssize_t nread, const uv_buf_t *buf) {
+        tcp_context *strm = static_cast<tcp_context *>(tcp_con::from(s));
+        strm->get_dispatcher()->read_con_cb(strm, nread, buf);
+    };
+    return tcp_con::read_start(alloc_cb, read_cb);
 }
 
 } // namespace pruv

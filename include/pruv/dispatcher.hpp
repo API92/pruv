@@ -70,6 +70,9 @@ protected:
         /// If returns false, connection will be closed.
         virtual bool finish_response(const shmem_buffer &resp_buf) noexcept = 0;
 
+        bool read_start();
+        using tcp_con::read_stop;
+
     private:
         friend dispatcher;
         friend list_node;

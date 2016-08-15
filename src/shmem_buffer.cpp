@@ -53,8 +53,8 @@ bool shmem_buffer::open(const char *name, bool for_write) noexcept
             pruv_log(LOG_ERR, "Not enough memory for name");
             return false;
         }
-        int r = snprintf(new_name, buflen, "/pruv-shm-%0.16" PRIx64
-                "%0.16" PRIx64, rnd[0], rnd[1]);
+        int r = snprintf(new_name, buflen, "/pruv-shm-%.16" PRIx64
+                "%.16" PRIx64, rnd[0], rnd[1]);
         if (r < 0 || r >= (int)buflen) {
             pruv_log(LOG_ERR, "Error printing random name");
             free(new_name);

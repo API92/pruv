@@ -35,10 +35,12 @@ void log_syserr_with_location(int level, const char *msg,
 
 } // namespace pruv
 
-#define pruv_log(level, format, ...) \
+#define pruv_log1(level, format, ...) \
     ::pruv::log_with_location(level, \
             "CODE_FUNC=%s CODE_FILE=%s CODE_LINE=%d " format, format, \
             __PRETTY_FUNCTION__, __FILE__, int(__LINE__), ##__VA_ARGS__)
+
+#define pruv_log(...) pruv_log1(__VA_ARGS__, "")
 
 #define pruv_log_uv_err(level, msg, error) \
     ::pruv::log_uv_err_with_location(level, msg, error, \

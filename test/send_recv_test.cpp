@@ -75,7 +75,7 @@ bool test_context::response_ready(const request_meta &r,
         const shmem_buffer &resp_buf) noexcept
 {
     EXPECT_TRUE(req_end);
-    EXPECT_EQ(0, resp_len);
+    EXPECT_EQ(0U, resp_len);
     resp_len = 0;
     return true;
 }

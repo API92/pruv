@@ -62,7 +62,7 @@ bool http_dispatcher::tcp_http_context::parse_request(shmem_buffer *buf)
         return false;
     }
     if (parser.upgrade) {
-        pruv_log(LOG_WARNING, "HTTP Upgrade not supported. Close connection.");
+        pruv_log(LOG_WARNING, "HTTP Upgrade not supported. Disconnecting.");
         return false;
     }
 

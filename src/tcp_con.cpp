@@ -39,7 +39,8 @@ bool tcp_con::accept(uv_loop_t *loop, uv_stream_t *server, void *owner,
 
 void tcp_con::close() noexcept
 {
-    uv_close(base<uv_handle_t *>(), close_cb);
+    if (!uv_is_closing(base<uv_handle_t *>()))
+        uv_close(base<uv_handle_t *>(), close_cb);
 }
 
 void tcp_con::close_cb(uv_handle_t *handle) noexcept

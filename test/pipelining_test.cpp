@@ -321,9 +321,11 @@ TEST_P(pipeline, test_1)
             st.recv_buffer.begin(), st.recv_buffer.end()));
 }
 
-INSTANTIATE_TEST_CASE_P(inworker, pipeline, ::testing::Values(false));
+INSTANTIATE_TEST_CASE_P(inworker, pipeline, ::testing::Values(false),
+        ::testing::internal::DefaultParamName<bool>);
 
-INSTANTIATE_TEST_CASE_P(inplace, pipeline, ::testing::Values(true));
+INSTANTIATE_TEST_CASE_P(inplace, pipeline, ::testing::Values(true),
+        ::testing::internal::DefaultParamName<bool>);
 
 } // namespace
 } // namespace pruv
