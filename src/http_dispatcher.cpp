@@ -38,20 +38,24 @@ void http_dispatcher::tcp_http_context::prepare_for_request() noexcept
 bool http_dispatcher::tcp_http_context::parse_request(shmem_buffer *buf)
     noexcept
 {
-    assert(buf);
     if (req_end) // Protection from pipelining. Reset it after sending response.
         return false;
     if (!buf)
         return true;
+
+    struct req_settings : http_parser_settings {
+        req_settings() {
+            memset(this, 0, sizeof(*this));
+            on_message_complete = [](http_parser *parser) {
+                *reinterpret_cast<bool *>(parser->data) = true;
+                // Returning 1 stops parsing after message end.
+                // It needed to detect new message after end of this message.
+                return 1;
+            };
+        }
+    } static const settings;
+
     parser.data = &req_end;
-    http_parser_settings settings;
-    memset(&settings, 0, sizeof(settings));
-    settings.on_message_complete = [](http_parser *parser) {
-        *reinterpret_cast<bool *>(parser->data) = true;
-        // Returning 1 stops parsing after message end.
-        // It needed to detect new message after end of this message.
-        return 1;
-    };
     buf->seek(request_len, REQUEST_CHUNK);
     size_t len = buf->data_size() - buf->cur_pos();
     size_t nparsed = http_parser_execute(&parser, &settings,
