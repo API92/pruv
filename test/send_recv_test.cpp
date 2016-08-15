@@ -82,7 +82,7 @@ bool test_context::response_ready(const request_meta &r,
 
 bool test_context::parse_response(shmem_buffer &buf) noexcept
 {
-    EXPECT_LT(resp_len, buf.data_size());
+    EXPECT_LE(resp_len, buf.data_size());
     resp_len = std::min(buf.data_size(),
             resp_len + size_t(buf.map_end() - buf.map_ptr()));
     EXPECT_GE(exp_resp_len, resp_len);

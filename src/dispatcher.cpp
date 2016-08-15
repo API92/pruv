@@ -323,8 +323,7 @@ void dispatcher::respond_or_enqueue(tcp_context *con) noexcept
 
     con->resp_buffers.push_back(buf);
     move_to(tcp_context::LIST_IO, con);
-    if (!con->inplace_response(con->request, *con->read_buffer, *buf) ||
-        !buf->data_size())
+    if (!con->inplace_response(con->request, *con->read_buffer, *buf))
         return con->remove_from_dispatcher();
 
 
@@ -525,10 +524,6 @@ void dispatcher::write_con(tcp_context *con) noexcept
 {
     assert(loop);
     assert(!con->resp_buffers.empty());
-    shmem_buffer_node *buf = &con->resp_buffers.front();
-    if (buf->cur_pos() >= buf->data_size())
-        return on_end_write_con(con);
-
     assert(!con->empty()); // must be in some list
     // Writing response for one response and scheduling/processing the second
     // response can be at the same time. In this case connection is in
@@ -537,6 +532,7 @@ void dispatcher::write_con(tcp_context *con) noexcept
     if (con->list_id == tcp_context::LIST_IO)
         move_to(tcp_context::LIST_IO, con);
 
+    shmem_buffer_node *buf = &con->resp_buffers.front();
     if (buf->map_ptr() == buf->map_end()) {
         // Mapped chunk was fully written. Map next chunk.
         size_t map_size = std::min(RESPONSE_CHUNK,
@@ -548,25 +544,28 @@ void dispatcher::write_con(tcp_context *con) noexcept
     if (!con->parse_response(*buf))
         return con->remove_from_dispatcher();
 
-    size_t chunk_size = std::min(size_t(buf->map_end() - buf->map_ptr()),
-            buf->data_size() - buf->cur_pos());
-
     auto write_cb = [](uv_write_t *r, int status) {
         tcp_context *con = static_cast<tcp_context *>(tcp_con::from(r->handle));
         if (con->resp_buffers.empty())
-            // Connection was closed and buffers was returned to pool.
-            return;
+            return; // Connection was closed and buffers was returned to pool.
         if (status < 0) {
             pruv_log_uv_err(LOG_ERR, "", status);
             return con->remove_from_dispatcher();
         }
         size_t chunk_size = (size_t)r->data;
-        con->resp_buffers.front().move_ptr(chunk_size);
+        shmem_buffer_node &buf = con->resp_buffers.front();
+        buf.move_ptr(chunk_size);
         pruv_log(LOG_DEBUG, "Response chunk of %" PRIuPTR " bytes written",
                 chunk_size);
+        if (buf.cur_pos() >= buf.data_size())
+            // Do it in callback to protect from infinite recursion
+            // on_end_write_con -> respond_or_enqueue -> ... for empty response.
+            return con->get_dispatcher()->on_end_write_con(con);
         con->get_dispatcher()->write_con(con);
     };
 
+    size_t chunk_size = std::min(size_t(buf->map_end() - buf->map_ptr()),
+            buf->data_size() - buf->cur_pos()); // Can be 0 for empty response
     uv_buf_t wbuf = uv_buf_init(buf->map_ptr(), chunk_size);
     con->write_req.data = (void *)chunk_size;
     int r = uv_write(&con->write_req, con->base<uv_stream_t *>(), &wbuf, 1,
