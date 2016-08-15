@@ -323,7 +323,8 @@ void dispatcher::respond_or_enqueue(tcp_context *con) noexcept
 
     con->resp_buffers.push_back(buf);
     move_to(tcp_context::LIST_IO, con);
-    if (!con->inplace_response(con->request, *con->read_buffer, *buf))
+    if (!con->inplace_response(con->request, *con->read_buffer, *buf) ||
+        !con->response_ready(con->request, *buf))
         return con->remove_from_dispatcher();
 
 

@@ -91,7 +91,6 @@ bool http_dispatcher::tcp_http_context::response_ready(const request_meta &,
     assert(req_end);
     // Initialize response parser before first chunk of data.
     http_parser_init(&parser, HTTP_RESPONSE);
-    keep_alive = false;
     return true;
 }
 
@@ -102,7 +101,7 @@ bool http_dispatcher::tcp_http_context::parse_response(shmem_buffer &buf)
     http_parser_settings parser_settings;
     memset(&parser_settings, 0, sizeof(parser_settings));
     parser.data = &keep_alive;
-    
+
     parser_settings.on_headers_complete = [](http_parser *parser) {
         *reinterpret_cast<bool *>(parser->data) =
             http_should_keep_alive(parser);
@@ -120,7 +119,11 @@ bool http_dispatcher::tcp_http_context::finish_response(const shmem_buffer &)
 {
     // After end of response we can read next request.
     prepare_for_request();
-    return keep_alive;
+    if (keep_alive) {
+        keep_alive = false;
+        return true;
+    }
+    return false;
 }
 
 } // namespace pruv

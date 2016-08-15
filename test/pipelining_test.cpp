@@ -138,7 +138,6 @@ bool pipeline_context::inplace_response(const request_meta &r,
         EXPECT_TRUE(move_res);
         if (!move_res)
             return false;
-        req_end = wait_response = false;
         return true;
     }
     else
@@ -148,7 +147,6 @@ bool pipeline_context::inplace_response(const request_meta &r,
 bool pipeline_context::response_ready(const request_meta &,
         const shmem_buffer &) noexcept
 {
-    keep_alive = false;
     req_end = wait_response = false;
     return true;
 }

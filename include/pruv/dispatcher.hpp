@@ -58,7 +58,8 @@ protected:
         virtual bool inplace_response(const request_meta &r,
                 shmem_buffer &buf_in, shmem_buffer &buf_out) noexcept = 0;
 
-        /// Called after response message received from worker.
+        /// Called after response message received from worker or
+        /// when inplace response generated.
         /// If returns false, connection will be closed.
         virtual bool response_ready(const request_meta &r,
                 const shmem_buffer &resp_buf) noexcept = 0;
