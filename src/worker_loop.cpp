@@ -29,7 +29,7 @@ void termhdlr(int sig)
 
 } // namespace
 
-int worker_loop::setup()
+int worker_loop::setup() noexcept
 {
     struct sigaction sigact;
     memset(&sigact, 0, sizeof(sigact));
@@ -54,7 +54,7 @@ int worker_loop::setup()
     return EXIT_SUCCESS;
 }
 
-int worker_loop::run()
+int worker_loop::run() noexcept
 {
     for (;;) {
         if (!next_request()) {

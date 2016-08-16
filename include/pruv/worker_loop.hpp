@@ -12,8 +12,8 @@ namespace pruv {
 
 class worker_loop {
 public:
-    static int setup();
-    int run();
+    static int setup() noexcept;
+    int run() noexcept;
 
 protected:
     virtual int handle_request() noexcept = 0;

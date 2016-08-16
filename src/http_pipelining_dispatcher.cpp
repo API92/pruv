@@ -28,26 +28,6 @@ http_pipelining_dispatcher::http_pipelining_context::http_pipelining_context()
 {
     prepare_for_request();
     http_parser_init(&parser_out, HTTP_RESPONSE);
-
-    // Settings for request parser
-    parser_in.data = &req_end;
-    memset(&settings_in, 0, sizeof(settings_in));
-    settings_in.on_message_complete = [](http_parser *parser) {
-        *reinterpret_cast<bool *>(parser->data) = true;
-        // Returning 1 stops parsing after message end.
-        // It needed to detect new message after end of this message.
-        return 1;
-    };
-
-    // Settings for response parser
-    memset(&settings_out, 0, sizeof(settings_out));
-    parser_out.data = &keep_alive;
-    settings_out.on_headers_complete = [](http_parser *parser) {
-        *reinterpret_cast<bool *>(parser->data) =
-            http_should_keep_alive(parser);
-        // Returning 1 needed to stop parsing after headers complete.
-        return 1;
-    };
 }
 
 void http_pipelining_dispatcher::http_pipelining_context::prepare_for_request()
@@ -69,6 +49,22 @@ bool http_pipelining_dispatcher::http_pipelining_context::parse_request(
         return false;
     if (req_end)
         return true;
+
+    // Settings for request parser
+    struct settings : http_parser_settings {
+        settings() {
+            memset(this, 0, sizeof(*this));
+            on_message_complete = cb;
+        }
+        static int cb(http_parser *parser) {
+            *reinterpret_cast<bool *>(parser->data) = true;
+            // Returning 1 stops parsing after message end.
+            // It needed to detect new message after end of this message.
+            return 1;
+        }
+    } static const settings_in;
+    parser_in.data = &req_end;
+
 
     while (!req_end && request_pos + request_len < buf->data_size()) {
         if (!buf->seek(request_pos + request_len, REQUEST_CHUNK))
@@ -107,14 +103,10 @@ bool http_pipelining_dispatcher::http_pipelining_context::get_request(
     r.size = request_len;
     r.protocol = "HTTP";
     r.inplace = false;
-    if (req_end) {
-        if (wait_response)
-            return false;
-        else {
-            wait_response = true;
-            prepare_for_request();
-            return true;
-        }
+    if (req_end && !wait_response) {
+        wait_response = true;
+        prepare_for_request();
+        return true;
     }
     else
         return false;
@@ -134,6 +126,21 @@ bool http_pipelining_dispatcher::http_pipelining_context::response_ready(
 bool http_pipelining_dispatcher::http_pipelining_context::parse_response(
         shmem_buffer &buf) noexcept
 {
+    // Settings for response parser
+    struct settings : http_parser_settings {
+        settings() {
+            memset(this, 0, sizeof(*this));
+            on_headers_complete = cb;
+        }
+        static int cb(http_parser *parser) {
+            *reinterpret_cast<bool *>(parser->data) =
+                http_should_keep_alive(parser);
+            // Returning 1 needed to stop parsing after headers complete.
+            return 1;
+        };
+    } static const settings_out;
+    parser_out.data = &keep_alive;
+
     size_t len = std::min(size_t(buf.map_end() - buf.map_ptr()),
                 buf.data_size() - buf.cur_pos());
     http_parser_execute(&parser_out, &settings_out, buf.map_ptr(), len);

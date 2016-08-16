@@ -46,12 +46,13 @@ bool http_dispatcher::tcp_http_context::parse_request(shmem_buffer *buf)
     struct req_settings : http_parser_settings {
         req_settings() {
             memset(this, 0, sizeof(*this));
-            on_message_complete = [](http_parser *parser) {
-                *reinterpret_cast<bool *>(parser->data) = true;
-                // Returning 1 stops parsing after message end.
-                // It needed to detect new message after end of this message.
-                return 1;
-            };
+            on_message_complete = cb;
+        }
+        static int cb(http_parser *parser) {
+            *reinterpret_cast<bool *>(parser->data) = true;
+            // Returning 1 stops parsing after message end.
+            // It needed to detect new message after end of this message.
+            return 1;
         }
     } static const settings;
 

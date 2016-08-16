@@ -1,2 +1,2 @@
 # pruv
-Simple tcp server based on libuv.
+Primitive tcp server based on libuv.

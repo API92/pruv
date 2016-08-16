@@ -171,6 +171,8 @@ bool shmem_buffer::seek(size_t pos, size_t segment_size) noexcept
     size_t base_pos = pos & ~PAGESIZE_MASK;
     if (base_pos + segment_size <= pos)
         segment_size += PAGESIZE;
+    if (base_pos > file_size_)
+        return false;
     if (base_pos == file_size_ && !resize(base_pos + segment_size))
         return false;
     if (base_pos + segment_size > file_size_)

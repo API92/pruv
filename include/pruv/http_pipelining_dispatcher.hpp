@@ -31,8 +31,6 @@ protected:
 
         http_parser parser_in;
         http_parser parser_out;
-        http_parser_settings settings_in;
-        http_parser_settings settings_out;
         size_t request_pos;
         size_t request_len;
         size_t resp_sum_size = 0;
