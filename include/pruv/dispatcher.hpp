@@ -19,6 +19,7 @@ namespace pruv {
 class dispatcher {
 public:
     virtual ~dispatcher();
+    void set_timeouts(bool enable) noexcept;
     /// new_loop, worker_name and worker_args must be valid until stop called.
     void start(uv_loop_t *new_loop, const char *ip, int port,
             size_t workers_max, const char *worker_name,
@@ -223,6 +224,7 @@ private:
     const char * const *worker_args = nullptr;
     size_t workers_cnt = 0;
     size_t workers_max = 0;
+    bool timeouts_enabled = true;
 
     tcp_server server;
     uv_timer_t timer;

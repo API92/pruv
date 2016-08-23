@@ -83,6 +83,7 @@ int main(int argc, char * const *argv)
     uv_disable_stdio_inheritance();
 
     int daemon_or_worker = 0;
+    int disable_timeouts = 0;
     int log_level = LOG_INFO;
     const char *listen_addr = "::";
     int listen_port = 8000;
@@ -92,6 +93,7 @@ int main(int argc, char * const *argv)
     const option opts[] = {
         {"daemon", no_argument, &daemon_or_worker, 1},
         {"worker", no_argument, &daemon_or_worker, 2},
+        {"notimeouts", no_argument, &disable_timeouts, 1},
         {"loglevel", required_argument, &log_level, LOG_INFO},
         {"listen-addr", required_argument, nullptr, 1},
         {"listen-port", required_argument, &listen_port, 8000},
@@ -186,6 +188,8 @@ int main(int argc, char * const *argv)
             uv_unref((uv_handle_t *)&sig[i]);
 
     dispatcher.reset(new pruv::http_pipelining_dispatcher);
+    if (disable_timeouts)
+        dispatcher->set_timeouts(!disable_timeouts);
     dispatcher->start(&loop, listen_addr, listen_port,
             workers_num, worker_exe, worker_args.data());
 

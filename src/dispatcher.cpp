@@ -38,6 +38,11 @@ dispatcher::~dispatcher()
     assert(resp_bufs.empty());
 }
 
+void dispatcher::set_timeouts(bool enable) noexcept
+{
+    timeouts_enabled = enable;
+}
+
 void dispatcher::start(uv_loop_t *new_loop, const char *ip, int port,
         size_t workers_max, const char *worker_name,
         const char * const *worker_args) noexcept
@@ -719,6 +724,8 @@ void dispatcher::close_timer() noexcept
 
 void dispatcher::on_timer_tick() noexcept
 {
+    if (!timeouts_enabled)
+        return;
     assert(loop);
     uint64_t now = uv_now(loop);
     for (const worker_process &w : terminated_workers) {
