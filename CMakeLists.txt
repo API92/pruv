@@ -26,6 +26,11 @@ if (NOT HttpParser_FOUND)
 endif()
 include_directories(${HTTP_PARSER_INCLUDE_DIR})
 
+if (NOT falloc_FOUND)
+    find_package(falloc REQUIRED)
+endif()
+include_directories(${falloc_INCLUDE_DIR})
+
 if (NOT Gtest_FOUND)
     find_package(Gtest REQUIRED)
 endif()
@@ -38,6 +43,7 @@ add_library(${PROJECT_NAME}
     include/pruv/cleanup_helpers.hpp
     include/pruv/http_dispatcher.hpp
     include/pruv/http_pipelining_dispatcher.hpp
+    include/pruv/http_worker.hpp
     include/pruv/list_node.hpp
     include/pruv/log.hpp
     include/pruv/process.hpp
@@ -51,6 +57,7 @@ add_library(${PROJECT_NAME}
     src/dispatcher.cpp
     src/http_pipelining_dispatcher.cpp
     src/http_dispatcher.cpp
+    src/http_worker.cpp
     src/log.cpp
     src/log_uv.cpp
     src/process.cpp
@@ -84,6 +91,7 @@ target_link_libraries(${PROJECT_NAME} ${HTTP_PARSER_LIBRARY})
 target_link_libraries(${PROJECT_NAME} rt)
 target_link_libraries(${PROJECT_NAME} ${SYSTEMD_LIBRARIES})
 target_link_libraries(${PROJECT_NAME} ${LIBUV_LIBRARY})
+target_link_libraries(${PROJECT_NAME} ${falloc_LIBRARY})
 
 target_link_libraries(${PROJECT_NAME}d ${HTTP_PARSER_LIBRARY})
 target_link_libraries(${PROJECT_NAME}d ${PROJECT_NAME})
