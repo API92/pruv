@@ -71,6 +71,7 @@ add_library(${PROJECT_NAME}
 )
 
 target_compile_options(${PROJECT_NAME} PUBLIC -fno-exceptions -fno-rtti)
+set_source_files_properties(src/shmem_cache.cpp PROPERTIES COMPILE_FLAGS -fexceptions)
 
 add_executable(${PROJECT_NAME}d
     daemon/main.cpp
