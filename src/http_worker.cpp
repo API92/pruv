@@ -145,8 +145,6 @@ struct http_worker::req_settings : http_parser_settings {
 
 int http_worker::handle_request() noexcept
 {
-    shmem_buffer *buf_out = get_response_buf();
-    assert(buf_out);
     if (interruption_requested())
         return send_error_response();
 
