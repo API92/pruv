@@ -137,7 +137,7 @@ void dispatcher::spawn_worker() noexcept
     assert(loop);
     worker_process *worker = new (std::nothrow) worker_process;
     if (!worker) {
-        pruv_log(LOG_ERR, "Not enough memory for worker");
+        pruv_log(LOG_EMERG, "Not enough memory for worker");
         return;
     }
     auto delcb = [](void *w) { delete reinterpret_cast<worker_process *>(w); };
@@ -237,7 +237,7 @@ void dispatcher::on_connection(uv_stream_t *server, int status) noexcept
 
     tcp_context *con = create_connection();
     if (!con)
-        return pruv_log(LOG_ERR, "No memory for connect");
+        return pruv_log(LOG_EMERG, "No memory for connect");
 
     auto deleter = [](tcp_con *p) {
         tcp_context *con = static_cast<tcp_context *>(p);
@@ -639,7 +639,7 @@ dispatcher::get_buffer(bool for_request) noexcept
 
     scoped_ptr<shmem_buffer_node> buf(new (std::nothrow) shmem_buffer_node);
     if (!buf) {
-        pruv_log(LOG_ERR, "No memory for shmem_buffer_node");
+        pruv_log(LOG_EMERG, "No memory for shmem_buffer_node");
         return nullptr;
     }
     if (!buf->open(nullptr, true))

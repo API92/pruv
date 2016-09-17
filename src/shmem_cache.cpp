@@ -2,47 +2,82 @@
  * Copyright (C) Andrey Pikas
  */
 
-#include <pruv/log.hpp>
 #include <pruv/shmem_cache.hpp>
+
+#include <cstring> // strcmp, strlen
+#include <functional> // hash
+
+#include <pruv/log.hpp>
 
 namespace pruv {
 
-shmem_cache::~shmem_cache()
+namespace {
+
+struct entry : hash_table::entry {
+    shmem_buffer shm;
+    char name[50];
+
+    bool equal(char const *rhs) const noexcept
+    {
+        return !strcmp(name, rhs);
+    }
+};
+
+size_t cstr_hash(char const *s, size_t len) noexcept
 {
-    try {
-        for (auto &name_buf : name_to_buf)
-            if (name_buf.second.opened())
-                name_buf.second.close();
-        name_to_buf.clear();
-        name_holder.clear();
-    }
-    catch (...) {
-        pruv_log(LOG_ERR, "Can't clear shmem_cache.");
-    }
+    return std::_Hash_impl::hash(s, len);
 }
 
-shmem_buffer * shmem_cache::get(const char *name) noexcept
+} // namepspace
+
+
+shmem_cache::~shmem_cache()
 {
-    try {
-        auto it = name_to_buf.find(name);
-        if (it != name_to_buf.end() && it->second.opened())
-            return &it->second;
-        shmem_buffer *buf = nullptr;
-        if (it == name_to_buf.end()) {
-            name_holder.emplace_back(name);
-            buf = &name_to_buf[name_holder.back().data()];
-        }
-        else
-            buf = &it->second;
-        if (!buf->open(name, true))
+    name_to_buf.clear(nullptr, [](void *, hash_table::entry *base_e) {
+        entry *e = static_cast<entry *>(base_e);
+        if (e->shm.opened())
+            e->shm.close();
+        delete e;
+    });
+}
+
+shmem_buffer * shmem_cache::get(char const *name) noexcept
+{
+    size_t name_len = strlen(name);
+    hash_table::iterator it = name_to_buf.find(cstr_hash(name, name_len), name,
+        [](void const *name, hash_table::entry const *e) {
+            return static_cast<entry const *>(e)->equal((char const *)name);
+        });
+
+    if (it && it.get<entry>()->shm.opened())
+        return &it.get<entry>()->shm;
+
+    if (!it) {
+        if (name_len >= sizeof(entry::name) / sizeof(*entry::name)) {
+            pruv_log(LOG_ERR, "Name is too long.");
             return nullptr;
-        buf->set_data_size(0);
-        return buf;
+        }
+
+        entry *e = new (std::nothrow) entry;
+        if (!e) {
+            pruv_log(LOG_EMERG, "Can't allocate memory for cache entry.");
+            return nullptr;
+        }
+        e->hash = cstr_hash(name, name_len);
+        memcpy(e->name, name, name_len + 1);
+
+        it = name_to_buf.insert(e);
+        if (!it) {
+            pruv_log(LOG_EMERG, "Can't insert cache entry.");
+            return nullptr;
+        }
     }
-    catch (...) {
-        pruv_log(LOG_ERR, "Can't get buffer from cache.");
-    }
-    return nullptr;
+
+    entry *e = it.get<entry>();
+    if (!e->shm.open(e->name, true))
+        return nullptr;
+    e->shm.set_data_size(0);
+    return &e->shm;
 }
 
 } // namespace pruv

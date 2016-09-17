@@ -32,7 +32,7 @@ http_worker::header * http_worker::headers::emplace_back(char const *field,
         push_back(h);
     }
     else
-        pruv_log(LOG_ERR, "Can't allocate memory for header");
+        pruv_log(LOG_EMERG, "Can't allocate memory for header");
     return h;
 }
 
@@ -59,7 +59,7 @@ http_worker::body_chunk * http_worker::body::emplace_back(char const *data,
         push_back(h);
     }
     else
-        pruv_log(LOG_ERR, "Can't allocate memory for header");
+        pruv_log(LOG_EMERG, "Can't allocate memory for header");
     return h;
 }
 

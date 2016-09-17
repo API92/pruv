@@ -41,6 +41,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -pedantic")
 add_library(${PROJECT_NAME}
     include/pruv/dispatcher.hpp
     include/pruv/cleanup_helpers.hpp
+    include/pruv/hash_table.hpp
     include/pruv/http_dispatcher.hpp
     include/pruv/http_pipelining_dispatcher.hpp
     include/pruv/http_worker.hpp
@@ -55,6 +56,7 @@ add_library(${PROJECT_NAME}
     include/pruv/termination.hpp
     include/pruv/worker_loop.hpp
     src/dispatcher.cpp
+    src/hash_table.cpp
     src/http_pipelining_dispatcher.cpp
     src/http_dispatcher.cpp
     src/http_worker.cpp
@@ -71,7 +73,6 @@ add_library(${PROJECT_NAME}
 )
 
 target_compile_options(${PROJECT_NAME} PUBLIC -fno-exceptions -fno-rtti)
-set_source_files_properties(src/shmem_cache.cpp PROPERTIES COMPILE_FLAGS -fexceptions)
 
 add_executable(${PROJECT_NAME}d
     daemon/main.cpp

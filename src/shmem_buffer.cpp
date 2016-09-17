@@ -50,7 +50,7 @@ bool shmem_buffer::open(const char *name, bool for_write) noexcept
         size_t buflen = 50;
         char *new_name = (char *)malloc(buflen);
         if (!new_name) {
-            pruv_log(LOG_ERR, "Not enough memory for name");
+            pruv_log(LOG_EMERG, "Not enough memory for name");
             return false;
         }
         int r = snprintf(new_name, buflen, "/pruv-shm-%.16" PRIx64

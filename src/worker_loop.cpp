@@ -8,6 +8,7 @@
 #include <cassert>
 #include <cinttypes>
 #include <cstring>
+#include <iterator>
 
 #include <signal.h>
 #include <sys/prctl.h>

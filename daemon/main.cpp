@@ -104,7 +104,7 @@ int main(int argc, char * const *argv)
         std::unique_ptr<pruv::http_worker> loop(
                 new (std::nothrow) pruv::http_worker);
         if (!loop) {
-            pruv::log(LOG_ERR, "No memory for worker loop object.");
+            pruv::log(LOG_EMERG, "No memory for worker loop object.");
             return EXIT_FAILURE;
         }
         return loop->run();
