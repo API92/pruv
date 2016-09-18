@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) Andrey Pikas
+ */
+
 #pragma once
 
 #include <cstddef> // size_t

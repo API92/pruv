@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) Andrey Pikas
+ */
+
 #include <pruv/hash_table.hpp>
 
 #include <algorithm>
