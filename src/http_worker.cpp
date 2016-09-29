@@ -146,7 +146,7 @@ struct http_worker::req_settings : http_parser_settings {
 int http_worker::handle_request() noexcept
 {
     if (interruption_requested())
-        return send_error_response();
+        return send_empty_response("500 Internal Server Error");
 
     static const req_settings settings;
     http_parser parser;
@@ -161,24 +161,25 @@ int http_worker::handle_request() noexcept
 
     if (nparsed != get_request_len() || !_url) {
         pruv_log(LOG_WARNING, "HTTP parsing error");
-        return send_error_response();
+        return send_empty_response("400 Bad Request");
     }
     _method = static_cast<http_method>(parser.method);
     return do_response();
 }
 
-int http_worker::send_error_response() noexcept
+int http_worker::send_empty_response(char const *status_line) noexcept
 {
-    static char const resp[] =
-        u8"HTTP/1.1 400 Bad Request\r\n"
-        u8"Content-Length: 14\r\n"
-        u8"Content-Type: text/html; charset=utf-8\r\n"
-        u8"Connection: close\r\n"
-        u8"\r\n"
-        u8"Bad Request!\r\n"
-    ;
-    static const size_t resp_len = strlen(resp);
-    return send_response(resp, resp_len);
+    if (!start_response(u8"HTTP/1.1", status_line))
+        return EXIT_FAILURE;
+    if (!keep_alive() && !write_header(u8"Connection", u8"close"))
+        return EXIT_FAILURE;
+    if (!complete_headers())
+        return EXIT_FAILURE;
+    if (!complete_body())
+        return EXIT_FAILURE;
+    if (!send_last_response())
+        return EXIT_FAILURE;
+    return EXIT_SUCCESS;
 }
 
 int http_worker::send_response(char const *response, size_t length) noexcept
@@ -211,12 +212,16 @@ bool http_worker::write_response(char const *data, size_t length) noexcept
     return true;
 }
 
-bool http_worker::start_response(char const *status_line) noexcept
+bool http_worker::start_response(char const *version,
+        char const *status_line) noexcept
 {
     _body_pos = 0;
     shmem_buffer *buf = get_response_buf();
     buf->set_data_size(0);
-    return write_response(status_line, strlen(status_line)) &&
+    return
+        write_response(version, strlen(version)) &&
+        write_response(" ", 1) &&
+        write_response(status_line, strlen(status_line)) &&
         write_response("\r\n", 2);
 }
 
@@ -270,19 +275,19 @@ int http_worker::do_response() noexcept
     int64_t value;
     int ret;
     if ((ret = sscanf(url(), "%*[/]%[^/]%*[/]%" SCNd64, op, &value)) != 2)
-        return send_error_response();
+        return send_empty_response("404 Not Found");
 
     if (!strcmp(op, "double"))
         value <<= 1;
     else if (!strcmp(op, "square"))
         value *= value;
     else
-        return send_error_response();
+        return send_empty_response("404 Not Found");
 
     char res[20] = {};
     snprintf(res, sizeof(res), "%" PRId64, value);
 
-    if (!start_response(u8"HTTP/1.1 200 OK"))
+    if (!start_response(u8"HTTP/1.1", u8"200 OK"))
         return EXIT_FAILURE;
     if (!write_header(u8"Content-Type", u8"text/html; charset=utf-8"))
         return EXIT_FAILURE;

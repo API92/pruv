@@ -43,9 +43,21 @@ public:
     /// Enumerate all entries.
     void for_each(void *opaque, void (*visitor)(void *, entry *)) noexcept;
 
+    template<typename T>
+    void for_each(T &&f) noexcept
+    {
+        for_each(&f, [](void *f, entry *e) { (*reinterpret_cast<T *>(f))(e); });
+    }
+
     /// Remove all entries from table and release internal memory.
     /// deleter called for each entry.
     void clear(void *opaque, void (*deleter)(void *, entry *)) noexcept;
+
+    template<typename T>
+    void clear(T &&f) noexcept
+    {
+        clear(&f, [](void *f, entry *e) { (*reinterpret_cast<T *>(f))(e); });
+    }
 
     /// Insert hashed entry into table.
     iterator insert(entry *e) noexcept;
@@ -56,6 +68,14 @@ public:
     /// Find entry by hash and comparator.
     iterator find(size_t hash, void const *opaque,
             bool (*cmp)(void const *, entry const *)) noexcept;
+
+    template<typename T>
+    iterator find(size_t hash, T const &f) noexcept
+    {
+        return find(hash, &f, [](void const *f, entry const *e) -> bool {
+                    return (*reinterpret_cast<T const *>(f))(e);
+                });
+    }
 
     bool empty() const noexcept { return _size == 0; }
 

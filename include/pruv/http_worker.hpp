@@ -38,13 +38,6 @@ public:
         void clear() noexcept;
     };
 
-protected:
-    virtual int handle_request() noexcept override;
-    virtual int do_response() noexcept;
-
-    int send_response(char const *response, size_t length) noexcept;
-    int send_error_response() noexcept;
-
     http_method method() const { return _method; }
     char const * url() const { return _url; }
     /// Request headers.
@@ -54,7 +47,14 @@ protected:
     bool keep_alive() const { return _keep_alive; }
     void set_keep_alive(bool value) { _keep_alive = value; }
 
-    bool start_response(char const *status_line) noexcept;
+protected:
+    virtual int handle_request() noexcept override;
+    virtual int do_response() noexcept;
+
+    int send_response(char const *response, size_t length) noexcept;
+    int send_empty_response(char const *status_line) noexcept;
+
+    bool start_response(char const *version, char const *status_line) noexcept;
     bool write_header(char const *name, char const *value) noexcept;
     bool complete_headers() noexcept;
     bool write_body(char const *data, size_t length) noexcept;

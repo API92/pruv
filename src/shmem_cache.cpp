@@ -33,7 +33,7 @@ size_t cstr_hash(char const *s, size_t len) noexcept
 
 shmem_cache::~shmem_cache()
 {
-    name_to_buf.clear(nullptr, [](void *, hash_table::entry *base_e) {
+    name_to_buf.clear([](hash_table::entry *base_e) {
         entry *e = static_cast<entry *>(base_e);
         if (e->shm.opened())
             e->shm.close();
@@ -44,9 +44,9 @@ shmem_cache::~shmem_cache()
 shmem_buffer * shmem_cache::get(char const *name) noexcept
 {
     size_t name_len = strlen(name);
-    hash_table::iterator it = name_to_buf.find(cstr_hash(name, name_len), name,
-        [](void const *name, hash_table::entry const *e) {
-            return static_cast<entry const *>(e)->equal((char const *)name);
+    hash_table::iterator it = name_to_buf.find(cstr_hash(name, name_len),
+        [name](hash_table::entry const *e) {
+            return static_cast<entry const *>(e)->equal(name);
         });
 
     if (it && it.get<entry>()->shm.opened())
