@@ -367,10 +367,10 @@ void dispatcher::schedule() noexcept
         con = &clients_scheduling.front();
         if (con->read_buffer) {
             req_len = snprintf(w.pipe_buf, sizeof(w.pipe_buf),
-                "%s IN SHM %s %" PRIuPTR ", %" PRIuPTR
-                " OUT SHM %s %" PRIuPTR "\n", con->request.protocol,
-                con->read_buffer->name(), con->request.pos, con->request.size,
-                resp_buf->name(), resp_buf->file_size());
+                "IN SHM %s %" PRIuPTR ", %" PRIuPTR
+                " OUT SHM %s %" PRIuPTR " META %s\n", con->read_buffer->name(),
+                con->request.pos, con->request.size, resp_buf->name(),
+                resp_buf->file_size(),  con->request.meta);
             if (req_len >= 0 && req_len < (int)sizeof(w.pipe_buf))
                 break;
         }

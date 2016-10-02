@@ -41,9 +41,9 @@ protected:
         struct request_meta {
             size_t pos;
             size_t size;
-            const char *protocol;
+            const char *meta;
             bool inplace;
-            request_meta() : pos(0), size(0), protocol(""), inplace(false) {}
+            request_meta() : pos(0), size(0), meta(""), inplace(false) {}
         };
 
     protected:

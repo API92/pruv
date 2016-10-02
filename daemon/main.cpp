@@ -24,7 +24,7 @@ std::unique_ptr<pruv::dispatcher> dispatcher;
 
 void stop_handler(uv_signal_t * /*handle*/, int signum)
 {
-    pruv::log(LOG_NOTICE, "Received signal %d", signum);
+    pruv_log(LOG_NOTICE, "Received signal %d", signum);
     if (dispatcher)
         dispatcher->stop();
 }
@@ -34,13 +34,13 @@ int parse_int_arg(const char *s, const char *optname)
     char *endptr = nullptr;
     unsigned long res = strtol(s, &endptr, 0);
     if ((res == ULONG_MAX && errno == ERANGE) || res > INT_MAX) {
-        pruv::log(LOG_EMERG, "Options \"%s\" value \"%s\" is out of range",
+        pruv_log(LOG_EMERG, "Options \"%s\" value \"%s\" is out of range",
                 optname, s);
         exit(EXIT_FAILURE);
     }
 
     if (*endptr) {
-        pruv::log(LOG_EMERG, "Options \"%s\" has non unsigned integer value",
+        pruv_log(LOG_EMERG, "Options \"%s\" has non unsigned integer value",
                 optname);
         exit(EXIT_FAILURE);
     }
@@ -89,7 +89,7 @@ int main(int argc, char * const *argv)
         else if (c == 3)
             worker_args.push_back(optarg);
         else if (c != '?') {
-            pruv::log(LOG_EMERG, "Unknown option");
+            pruv_log(LOG_EMERG, "Unknown option");
             exit(EXIT_FAILURE);
         }
     }
@@ -104,7 +104,7 @@ int main(int argc, char * const *argv)
         std::unique_ptr<pruv::http_worker> loop(
                 new (std::nothrow) pruv::http_worker);
         if (!loop) {
-            pruv::log(LOG_EMERG, "No memory for worker loop object.");
+            pruv_log(LOG_EMERG, "No memory for worker loop object.");
             return EXIT_FAILURE;
         }
         return loop->run();
@@ -120,11 +120,11 @@ int main(int argc, char * const *argv)
     worker_args.push_back(nullptr);
 
     if (daemon_or_worker == 1) {
-        pruv::log(LOG_NOTICE, "Begin daemon initialization.");
+        pruv_log(LOG_NOTICE, "Begin daemon initialization.");
 
         pid_t pid = fork();
         if (pid < 0) {
-            pruv::log(LOG_EMERG, "fork failed at start. errno = %d.", errno);
+            pruv_log(LOG_EMERG, "fork failed at start. errno = %d.", errno);
             return EXIT_FAILURE;
         }
         if (pid > 0)
@@ -132,9 +132,9 @@ int main(int argc, char * const *argv)
         umask(0);
         pid_t sid = setsid();
         if (sid < 0)
-            pruv::log(LOG_ERR, "setsid failed at start. errno = %d.", errno);
+            pruv_log(LOG_ERR, "setsid failed at start. errno = %d.", errno);
 
-        pruv::log(LOG_NOTICE, "Daemon started.");
+        pruv_log(LOG_NOTICE, "Daemon started.");
     }
 
     int r;
@@ -180,7 +180,7 @@ int main(int argc, char * const *argv)
         pruv::log_uv_err(LOG_ERR, "uv_loop_close main loop", r);
 
     if (daemon_or_worker == 1)
-        pruv::log(LOG_NOTICE, "Daemon stopped.");
+        pruv_log(LOG_NOTICE, "Daemon stopped.");
 
     return EXIT_SUCCESS;
 }

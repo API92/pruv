@@ -112,10 +112,11 @@ bool worker_loop::next_request() noexcept
     size_t buf_in_pos;
     size_t buf_in_len;
     size_t buf_out_file_size;
-    int parsed = sscanf(ln, "%255s IN SHM %255s %" SCNuPTR ", %" SCNuPTR
-            " OUT SHM %255s %" SCNuPTR, req_protocol, buf_in_name,
-            &buf_in_pos, &buf_in_len, buf_out_name, &buf_out_file_size);
-    if (parsed != 6) {
+    *req_meta = 0;
+    int parsed = sscanf(ln, "IN SHM %255s %" SCNuPTR ", %" SCNuPTR
+            " OUT SHM %255s %" SCNuPTR " META %255s", buf_in_name, &buf_in_pos,
+            &buf_in_len, buf_out_name, &buf_out_file_size, req_meta);
+    if (!(parsed == 6 || (parsed == 5 && !*req_meta))) {
         pruv_log(LOG_ERR, "Error parsing \"%s\"", ln);
         return false;
     }

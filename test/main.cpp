@@ -31,7 +31,7 @@ int main(int argc, char **argv) {
         if (loop)
             return loop->run();
         else {
-            pruv::log(LOG_EMERG, "Worker \"%s\" not found", worker);
+            pruv_log(LOG_EMERG, "Worker \"%s\" not found", worker);
             return EXIT_FAILURE;
         }
     }

@@ -52,7 +52,7 @@ bool test_context::get_request(request_meta &r) noexcept
 {
     r.pos = 0;
     r.size = exp_req_len;
-    r.protocol = "HTTP";
+    r.meta = "";
     r.inplace = false;
     if (req_end) {
         if (wait_response)

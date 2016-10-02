@@ -22,6 +22,7 @@ protected:
     char * get_request() const { return request; }
     size_t get_request_len() const { return request_len; }
     shmem_buffer * get_response_buf() const { return response_buf; }
+    char const * get_req_meta() const { return req_meta; }
 
 private:
     bool read_line() noexcept;
@@ -36,7 +37,7 @@ private:
     shmem_buffer *response_buf = nullptr;
 
     char ln[256];
-    char req_protocol[256];
+    char req_meta[256];
     char buf_in_name[256];
     char buf_out_name[256];
 };

@@ -80,7 +80,7 @@ bool http_dispatcher::tcp_http_context::get_request(request_meta &r) noexcept
     r.pos = 0;
     r.size = request_len;
     r.inplace = false;
-    r.protocol = "HTTP";
+    r.meta = "";
     return req_end;
 }
 

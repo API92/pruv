@@ -145,9 +145,6 @@ struct http_worker::req_settings : http_parser_settings {
 
 int http_worker::handle_request() noexcept
 {
-    if (interruption_requested())
-        return send_empty_response("500 Internal Server Error");
-
     static const req_settings settings;
     http_parser parser;
     http_parser_init(&parser, HTTP_REQUEST);
