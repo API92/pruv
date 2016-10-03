@@ -23,7 +23,7 @@ int main(int argc, char **argv) {
 
     pruv::openlog(pruv::log_type::JOURNALD, 7);
     if (worker) {
-        int r = pruv::worker_loop::setup();
+        int r = pruv::worker_loop::setup(argc, argv);
         if (r)
             return r;
         std::unique_ptr<pruv::worker_loop> loop =

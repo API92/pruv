@@ -12,7 +12,11 @@ namespace pruv {
 
 class worker_loop {
 public:
-    static int setup() noexcept;
+    static int setup(int argc, char const * const *argv) noexcept;
+    static int argc() noexcept;
+    static char const * const * argv() noexcept;
+
+
     int run() noexcept;
 
 protected:
@@ -40,6 +44,9 @@ private:
     char req_meta[256];
     char buf_in_name[256];
     char buf_out_name[256];
+
+    static int _argc;
+    static char const * const *_argv;
 };
 
 } // namespace pruv

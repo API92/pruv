@@ -98,7 +98,7 @@ int main(int argc, char * const *argv)
         log_level);
 
     if (daemon_or_worker == 2) {
-        int r = pruv::worker_loop::setup();
+        int r = pruv::worker_loop::setup(argc, argv);
         if (r)
             return r;
         std::unique_ptr<pruv::http_worker> loop(

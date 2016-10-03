@@ -30,8 +30,13 @@ void termhdlr(int sig)
 
 } // namespace
 
-int worker_loop::setup() noexcept
+int worker_loop::_argc = 0;
+char const * const * worker_loop::_argv = nullptr;
+
+int worker_loop::setup(int argc, char const * const *argv) noexcept
 {
+    _argc = argc;
+    _argv = argv;
     struct sigaction sigact;
     memset(&sigact, 0, sizeof(sigact));
     sigact.sa_handler = termhdlr;
