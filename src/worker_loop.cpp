@@ -112,12 +112,18 @@ bool worker_loop::next_request() noexcept
     size_t buf_in_pos;
     size_t buf_in_len;
     size_t buf_out_file_size;
-    *req_meta = 0;
+    int readed;
     int parsed = sscanf(ln, "IN SHM %255s %" SCNuPTR ", %" SCNuPTR
-            " OUT SHM %255s %" SCNuPTR " META %255s", buf_in_name, &buf_in_pos,
-            &buf_in_len, buf_out_name, &buf_out_file_size, req_meta);
-    if (!(parsed == 6 || (parsed == 5 && !*req_meta))) {
+            " OUT SHM %255s %" SCNuPTR " META %n", buf_in_name, &buf_in_pos,
+            &buf_in_len, buf_out_name, &buf_out_file_size, &readed);
+    if (parsed != 5) {
         pruv_log(LOG_ERR, "Error parsing \"%s\"", ln);
+        return false;
+    }
+
+    strncpy(req_meta, &ln[readed], sizeof(req_meta));
+    if (*std::prev(std::end(req_meta))) {
+        pruv_log(LOG_ERR, "Request meta too long.");
         return false;
     }
 

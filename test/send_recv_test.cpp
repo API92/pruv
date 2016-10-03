@@ -52,7 +52,8 @@ bool test_context::get_request(request_meta &r) noexcept
 {
     r.pos = 0;
     r.size = exp_req_len;
-    r.meta = "";
+    r.meta = "01234567890123456789012345678901234567890123456789"
+             "01234567890123456789012345678901234567890123456789";
     r.inplace = false;
     if (req_end) {
         if (wait_response)
