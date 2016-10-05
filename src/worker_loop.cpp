@@ -60,6 +60,16 @@ int worker_loop::setup(int argc, char const * const *argv) noexcept
     return EXIT_SUCCESS;
 }
 
+int worker_loop::argc() noexcept
+{
+    return _argc;
+}
+
+char const * const * worker_loop::argv() noexcept
+{
+    return _argv;
+}
+
 int worker_loop::run() noexcept
 {
     for (;;) {
