@@ -51,9 +51,6 @@ protected:
     virtual int handle_request() noexcept override;
     virtual int do_response() noexcept;
 
-    int send_response(char const *response, size_t length) noexcept;
-    int send_empty_response(char const *status_line) noexcept;
-
     bool start_response(char const *version, char const *status_line) noexcept;
     bool write_header(char const *name, char const *value) noexcept;
     bool complete_headers() noexcept;
@@ -62,6 +59,7 @@ protected:
 
 private:
     bool write_response(char const *data, size_t length) noexcept;
+    int send_empty_response(char const *status_line) noexcept;
 
     struct req_settings;
 

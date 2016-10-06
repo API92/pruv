@@ -55,6 +55,7 @@ int main(int argc, char * const *argv)
     int daemon_or_worker = 0;
     int disable_timeouts = 0;
     int log_level = LOG_INFO;
+    int log_locations = 1;
     const char *listen_addr = "::";
     int listen_port = 8000;
     int workers_num = 1;
@@ -65,6 +66,7 @@ int main(int argc, char * const *argv)
         {"worker", no_argument, &daemon_or_worker, 2},
         {"notimeouts", no_argument, &disable_timeouts, 1},
         {"loglevel", required_argument, &log_level, LOG_INFO},
+        {"nologlocations", no_argument, &log_locations, 0},
         {"listen-addr", required_argument, nullptr, 1},
         {"listen-port", required_argument, &listen_port, 8000},
         {"workers-num", required_argument, &workers_num, 1},
@@ -96,6 +98,7 @@ int main(int argc, char * const *argv)
     pruv::openlog(
         (daemon_or_worker ? pruv::log_type::JOURNALD : pruv::log_type::STDERR),
         log_level);
+    pruv::log_setup_locations(log_locations);
 
     if (daemon_or_worker == 2) {
         int r = pruv::worker_loop::setup(argc, argv);

@@ -179,21 +179,6 @@ int http_worker::send_empty_response(char const *status_line) noexcept
     return EXIT_SUCCESS;
 }
 
-int http_worker::send_response(char const *response, size_t length) noexcept
-{
-    shmem_buffer *buf_out = get_response_buf();
-    assert(buf_out);
-    buf_out->seek(0, RESPONSE_CHUNK);
-    buf_out->set_data_size(length);
-
-    if (buf_out->map_end() - buf_out->map_begin() < (ptrdiff_t)length)
-        if (!buf_out->reset_defaults(buf_out->data_size()))
-            return EXIT_FAILURE;
-    assert(!buf_out->cur_pos());
-    memcpy(buf_out->map_ptr(), response, buf_out->data_size());
-    return send_last_response() ? EXIT_SUCCESS : EXIT_FAILURE;
-}
-
 bool http_worker::write_response(char const *data, size_t length) noexcept
 {
     shmem_buffer *buf = get_response_buf();
