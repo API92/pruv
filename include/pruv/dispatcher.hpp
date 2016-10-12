@@ -39,11 +39,11 @@ protected:
     public:
         virtual ~tcp_context() {}
         struct request_meta {
-            size_t pos;
-            size_t size;
-            const char *meta;
-            bool inplace;
-            request_meta() : pos(0), size(0), meta(""), inplace(false) {}
+            size_t pos = 0;
+            size_t size = 0;
+            char *meta = nullptr;
+            void *opaque = nullptr;
+            bool inplace = false;
         };
 
     protected:

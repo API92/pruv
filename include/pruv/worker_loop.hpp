@@ -40,8 +40,8 @@ private:
     shmem_buffer *request_buf = nullptr;
     shmem_buffer *response_buf = nullptr;
 
-    char ln[256];
-    char req_meta[256];
+    char ln[1024];
+    char req_meta[1024];
     char buf_in_name[256];
     char buf_out_name[256];
 

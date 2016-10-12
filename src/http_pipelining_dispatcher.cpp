@@ -101,7 +101,7 @@ bool http_pipelining_dispatcher::http_pipelining_context::get_request(
 {
     r.pos = request_pos;
     r.size = request_len;
-    r.meta = "";
+    r.meta = nullptr;
     r.inplace = false;
     if (req_end && !wait_response) {
         wait_response = true;

@@ -6,7 +6,8 @@
 
 #include <algorithm>
 #include <cassert>
-#include <inttypes.h>
+#include <cstring>
+#include <cinttypes>
 
 #include <unistd.h>
 
@@ -368,9 +369,9 @@ void dispatcher::schedule() noexcept
         if (con->read_buffer) {
             req_len = snprintf(w.pipe_buf, sizeof(w.pipe_buf),
                 "IN SHM %s %" PRIuPTR ", %" PRIuPTR
-                " OUT SHM %s %" PRIuPTR " META %s\n", con->read_buffer->name(),
+                " OUT SHM %s %" PRIuPTR " META ", con->read_buffer->name(),
                 con->request.pos, con->request.size, resp_buf->name(),
-                resp_buf->file_size(),  con->request.meta);
+                resp_buf->file_size());
             if (req_len >= 0 && req_len < (int)sizeof(w.pipe_buf))
                 break;
         }
@@ -391,28 +392,31 @@ void dispatcher::schedule() noexcept
     in_use_workers.push_back(&w);
     move_to(tcp_context::LIST_PROCESSING, con);
 
-    auto write_cb = [](uv_write_t *req, int status) {
-        // This callback may be called after worker death.
-        // But worker_process structure will alive while pipe's
-        // structures alive.
-        worker_process *w = reinterpret_cast<worker_process *>(req->data);
-        dispatcher *d = reinterpret_cast<dispatcher *>(w->owner);
-        if (status != 0) {
-            pruv_log_uv_err(LOG_ERR, "write_cb", status);
-            return d->kill_worker(w);
-        }
-        pruv_log(LOG_DEBUG, "request sent to worker");
-        assert(w->io_state == worker_process::IO_WRITE);
-        // Before writing pipe_buf_ptr was at start. Writing don't move it.
-        assert(w->pipe_buf_ptr == w->pipe_buf);
-        w->io_state = worker_process::IO_READ;
-    };
-
     // Send request to worker.
     w.write_req.data = &w;
     w.io_state = worker_process::IO_WRITE;
-    uv_buf_t buf = uv_buf_init(w.pipe_buf, req_len);
-    int r = uv_write(&w.write_req, (uv_stream_t *)&w.in, &buf, 1, write_cb);
+    uv_buf_t bufs[3] = {uv_buf_init(w.pipe_buf, req_len)};
+    size_t bn = 1;
+    if (con->request.meta && *con->request.meta)
+        bufs[bn++] = uv_buf_init(con->request.meta, strlen(con->request.meta));
+    bufs[bn++] = uv_buf_init(&(w.pipe_buf[req_len] = '\n'), 1);
+    int r = uv_write(&w.write_req, (uv_stream_t *)&w.in, bufs, bn,
+        [](uv_write_t *req, int status) {
+            // This callback may be called after worker death.
+            // But worker_process structure will alive while pipe's
+            // structures alive.
+            worker_process *w = reinterpret_cast<worker_process *>(req->data);
+            dispatcher *d = reinterpret_cast<dispatcher *>(w->owner);
+            if (status != 0) {
+                pruv_log_uv_err(LOG_ERR, "write_cb", status);
+                return d->kill_worker(w);
+            }
+            pruv_log(LOG_DEBUG, "request sent to worker");
+            assert(w->io_state == worker_process::IO_WRITE);
+            // Before writing pipe_buf_ptr was at start. Writing don't move it.
+            assert(w->pipe_buf_ptr == w->pipe_buf);
+            w->io_state = worker_process::IO_READ;
+        });
     if (r < 0) {
         pruv_log_uv_err(LOG_ERR, "uv_write", r);
         kill_worker(&w); // Connection will be closed here too

@@ -102,7 +102,7 @@ bool pipeline_context::get_request(request_meta &r) noexcept
 {
     r.pos = request_pos;
     r.size = request_len;
-    r.meta = "";
+    r.meta = nullptr;
     r.inplace = inplace;
     if (req_end) {
         if (wait_response)
