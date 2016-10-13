@@ -21,12 +21,8 @@
 
 namespace pruv {
 
-namespace {
-
-const long PAGESIZE = sysconf(_SC_PAGE_SIZE);
-const size_t PAGESIZE_MASK = PAGESIZE - 1;
-
-} // namespace
+size_t const shmem_buffer::PAGE_SIZE = sysconf(_SC_PAGE_SIZE);
+size_t const shmem_buffer::PAGE_SIZE_MASK = PAGE_SIZE - 1;
 
 shmem_buffer::~shmem_buffer()
 {
@@ -81,7 +77,7 @@ bool shmem_buffer::open(const char *name, bool for_write) noexcept
 
 bool shmem_buffer::resize(size_t new_size) noexcept
 {
-    new_size = (new_size + PAGESIZE_MASK) & ~PAGESIZE_MASK;
+    new_size = (new_size + PAGE_SIZE_MASK) & ~PAGE_SIZE_MASK;
     int r;
     for (;;) {
         r = ftruncate(fd, new_size);
@@ -142,8 +138,8 @@ char * shmem_buffer::map_impl(size_t offset, size_t size) const noexcept
 
 bool shmem_buffer::map(size_t offset, size_t size) noexcept
 {
-    assert(!(offset & PAGESIZE_MASK));
-    size = (size + PAGESIZE_MASK) & ~PAGESIZE_MASK;
+    assert(!(offset & PAGE_SIZE_MASK));
+    size = (size + PAGE_SIZE_MASK) & ~PAGE_SIZE_MASK;
     if (map_offset_ == offset && (ptrdiff_t)size == map_end_ - map_begin_) {
         map_ptr_ = map_begin_;
         return true;
@@ -168,9 +164,9 @@ bool shmem_buffer::seek(size_t pos, size_t segment_size) noexcept
         move_ptr((ptrdiff_t)pos - (ptrdiff_t)cur_pos());
         return true;
     }
-    size_t base_pos = pos & ~PAGESIZE_MASK;
+    size_t base_pos = pos & ~PAGE_SIZE_MASK;
     if (base_pos + segment_size <= pos)
-        segment_size += PAGESIZE;
+        segment_size += PAGE_SIZE;
     if (base_pos > file_size_)
         return false;
     if (base_pos == file_size_ && !resize(base_pos + segment_size))

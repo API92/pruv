@@ -142,12 +142,10 @@ bool worker_loop::next_request() noexcept
         return false;
     }
 
-    static const size_t PAGESIZE_MASK = sysconf(_SC_PAGE_SIZE) - 1;
-
     shmem_buffer *buf_in = buf_in_cache.get(buf_in_name);
     if (!buf_in)
         return false;
-    size_t buf_in_base_pos = buf_in_pos & ~PAGESIZE_MASK;
+    size_t buf_in_base_pos = buf_in_pos & ~shmem_buffer::PAGE_SIZE_MASK;
     size_t in_len = buf_in_pos + buf_in_len - buf_in_base_pos;
     size_t buf_in_end_pos = buf_in->map_offset() +
         (buf_in->map_end() - buf_in->map_begin());

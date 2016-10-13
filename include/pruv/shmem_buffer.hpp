@@ -54,6 +54,9 @@ public:
     }
     void set_data_size(size_t value) { data_size_ = value; }
 
+    static size_t const PAGE_SIZE;
+    static size_t const PAGE_SIZE_MASK;
+
 private:
     char * map_impl(size_t offset, size_t size) const noexcept;
 
