@@ -93,7 +93,7 @@ struct http_worker::req_settings : http_parser_settings {
     static int on_url_cb(http_parser *parser, char const *p, size_t len)
         noexcept {
         http_worker *w = reinterpret_cast<http_worker *>(parser->data);
-        w->_url = p;
+        w->_url = const_cast<char *>(p);
         size_t end_pos = p - w->get_request() + len;
         if (end_pos >= w->get_request_len()) {
             pruv_log(LOG_ERR, "Parsed URI path too long.");

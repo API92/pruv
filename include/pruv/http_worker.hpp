@@ -39,7 +39,7 @@ public:
     };
 
     http_method method() const { return _method; }
-    char const * url() const { return _url; }
+    char * url() const { return _url; }
     /// Request headers.
     struct headers const & headers() const { return _headers; }
     /// Request body.
@@ -65,7 +65,7 @@ private:
 
     // request info
     http_method _method;
-    char const *_url = nullptr;
+    char *_url = nullptr;
     struct headers _headers;
     struct body _body;
     bool _keep_alive;
