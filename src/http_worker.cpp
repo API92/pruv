@@ -94,24 +94,24 @@ struct http_worker::req_settings : http_parser_settings {
         noexcept {
         http_worker *w = reinterpret_cast<http_worker *>(parser->data);
         w->_url = const_cast<char *>(p);
-        size_t end_pos = p - w->get_request() + len;
-        if (end_pos >= w->get_request_len()) {
+        size_t end_pos = p - w->request() + len;
+        if (end_pos >= w->request_len()) {
             pruv_log(LOG_ERR, "Parsed URI path too long.");
             return 1;
         }
-        w->get_request()[end_pos] = 0;
+        w->request()[end_pos] = 0;
         return 0;
     }
 
     static int on_header_field_cb(http_parser *parser, char const *p,
             size_t len) noexcept {
         http_worker *w = reinterpret_cast<http_worker *>(parser->data);
-        size_t end_pos = p - w->get_request() + len;
-        if (end_pos >= w->get_request_len()) {
+        size_t end_pos = p - w->request() + len;
+        if (end_pos >= w->request_len()) {
             pruv_log(LOG_ERR, "Parsed header field is too long");
             return 1;
         }
-        w->get_request()[end_pos] = 0;
+        w->request()[end_pos] = 0;
         if (!w->_headers.emplace_back(p, nullptr))
             return 1;
         return 0;
@@ -120,12 +120,12 @@ struct http_worker::req_settings : http_parser_settings {
     static int on_header_value_cb(http_parser *parser, char const *p,
             size_t len) noexcept {
         http_worker *w = reinterpret_cast<http_worker *>(parser->data);
-        size_t end_pos = p - w->get_request() + len;
-        if (end_pos >= w->get_request_len()) {
+        size_t end_pos = p - w->request() + len;
+        if (end_pos >= w->request_len()) {
             pruv_log(LOG_ERR, "Parsed header value is too long");
             return 1;
         }
-        w->get_request()[end_pos] = 0;
+        w->request()[end_pos] = 0;
         if (w->_headers.empty()) {
             pruv_log(LOG_WARNING, "Header field not parsed before value");
             return 1;
@@ -154,9 +154,9 @@ int http_worker::handle_request() noexcept
     _keep_alive = false;
 
     size_t nparsed = http_parser_execute(&parser, &settings,
-            get_request(), get_request_len());
+            request(), request_len());
 
-    if (nparsed != get_request_len() || !_url) {
+    if (nparsed != request_len() || !_url) {
         pruv_log(LOG_WARNING, "HTTP parsing error");
         return send_empty_response("400 Bad Request");
     }
@@ -181,7 +181,7 @@ int http_worker::send_empty_response(char const *status_line) noexcept
 
 bool http_worker::write_response(char const *data, size_t length) noexcept
 {
-    shmem_buffer *buf = get_response_buf();
+    shmem_buffer *buf = response_buf();
     while (length) {
         if (!buf->seek(buf->data_size(), RESPONSE_CHUNK))
             return false;
@@ -198,7 +198,7 @@ bool http_worker::start_response(char const *version,
         char const *status_line) noexcept
 {
     _body_pos = 0;
-    shmem_buffer *buf = get_response_buf();
+    shmem_buffer *buf = response_buf();
     buf->set_data_size(0);
     return
         write_response(version, strlen(version)) &&
@@ -220,7 +220,7 @@ bool http_worker::complete_headers() noexcept
     if (!write_header("Content-Length", "     ""     ""     ""     ") ||
         !write_response("\r\n", 2))
         return false;
-    _body_pos = get_response_buf()->data_size();
+    _body_pos = response_buf()->data_size();
     return true;
 }
 
@@ -231,7 +231,7 @@ bool http_worker::write_body(char const *data, size_t length) noexcept
 
 bool http_worker::complete_body() noexcept
 {
-    shmem_buffer *buf = get_response_buf();
+    shmem_buffer *buf = response_buf();
     if (buf->data_size() < _body_pos)
         return false;
     size_t content_length = buf->data_size() - _body_pos;

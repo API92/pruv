@@ -210,13 +210,13 @@ void connect(context *ctx)
 struct onerequest_worker : public worker_loop {
     virtual int handle_request() noexcept override
     {
-        if (get_request_len() != 3 * sizeof(size_t))
+        if (request_len() != 3 * sizeof(size_t))
             return EXIT_FAILURE;
-        size_t *p = reinterpret_cast<size_t *>(get_request());
+        size_t *p = reinterpret_cast<size_t *>(request());
         if (p[0] != 2 * sizeof(p[1]))
             return EXIT_FAILURE;
         size_t resp_len = p[2];
-        shmem_buffer *resp = get_response_buf();
+        shmem_buffer *resp = response_buf();
         if (!resp->reset_defaults(resp_len))
             return EXIT_FAILURE;
         resp->set_data_size(resp_len);
@@ -315,18 +315,17 @@ uint32_t adler32(unsigned char *data, size_t len)
 struct hashrequest_worker : public worker_loop {
     virtual int handle_request() noexcept override
     {
-        if (get_request_len() < 2 * sizeof(size_t))
+        if (request_len() < 2 * sizeof(size_t))
             return EXIT_FAILURE;
-        size_t *p = reinterpret_cast<size_t *>(get_request());
-        if (p[0] + 2 * sizeof(size_t) != get_request_len())
+        size_t *p = reinterpret_cast<size_t *>(request());
+        if (p[0] + 2 * sizeof(size_t) != request_len())
             return EXIT_FAILURE;
         size_t resp_len = 4;
-        shmem_buffer *resp = get_response_buf();
+        shmem_buffer *resp = response_buf();
         if (!resp->reset_defaults(resp_len))
             return EXIT_FAILURE;
         resp->set_data_size(resp_len);
-        unsigned char *body = (unsigned char *)get_request() +
-            2 * sizeof(size_t);
+        unsigned char *body = (unsigned char *)request() + 2 * sizeof(size_t);
         *reinterpret_cast<uint32_t *>(resp->map_ptr()) = adler32(body, p[0]);
         return send_last_response() ? EXIT_SUCCESS : EXIT_FAILURE;
     }

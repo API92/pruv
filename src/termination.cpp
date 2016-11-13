@@ -4,23 +4,34 @@
 
 #include <pruv/termination.hpp>
 
+#include <atomic>
+#include <cassert>
+
 namespace pruv {
 
 namespace {
 
-volatile interruption_type irq = IRQ_NONE;
+static std::atomic<interruption_type> irq(IRQ_NONE);
 
 } // namespace
 
-void set_interruption(interruption_type type) noexcept
+void setup_interruption(interruption_type type) noexcept
 {
-    if (type == IRQ_NONE || type > irq)
-        irq = type;
+    assert(type != IRQ_NONE);
+    interruption_type old = irq.load();
+    while (type >= old && !irq.compare_exchange_weak(old, type)) {}
+}
+
+void clear_interruption() noexcept
+{
+    interruption_type old = irq.load();
+    if (old == IRQ_INT)
+        irq.compare_exchange_strong(old, IRQ_NONE);
 }
 
 interruption_type interruption_requested() noexcept
 {
-    return irq;
+    return irq.load();
 }
 
 } // namespace pruv

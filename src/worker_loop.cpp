@@ -25,7 +25,7 @@ namespace {
 
 void termhdlr(int sig)
 {
-    set_interruption(sig == SIGINT ? IRQ_INT : IRQ_TERM);
+    setup_interruption(sig == SIGINT ? IRQ_INT : IRQ_TERM);
 }
 
 } // namespace
@@ -74,14 +74,14 @@ int worker_loop::run() noexcept
 {
     for (;;) {
         if (!next_request()) {
-            if (interruption_requested())
+            if (interruption_requested() == IRQ_TERM)
                 break;
             else
                 return EXIT_FAILURE;
         }
 
         int r = handle_request();
-        if (interruption_requested())
+        if (interruption_requested() == IRQ_TERM)
             break;
         else if (r != EXIT_SUCCESS)
             return r;
@@ -94,9 +94,9 @@ int worker_loop::run() noexcept
 
 bool worker_loop::read_line() noexcept
 {
-    char *dst = ln;
-    while (!interruption_requested()) {
-        ssize_t r = read(STDIN_FILENO, dst, std::end(ln) - dst);
+    char *dst = _ln;
+    while (interruption_requested() != IRQ_TERM) {
+        ssize_t r = read(STDIN_FILENO, dst, std::end(_ln) - dst);
         if (r == -1) {
             if (errno == EINTR)
                 continue;
@@ -111,7 +111,7 @@ bool worker_loop::read_line() noexcept
             *eol = 0;
             return true;
         }
-        if (dst >= std::end(ln)) {
+        if (dst >= std::end(_ln)) {
             pruv_log(LOG_ERR, "Too large input line");
             return false;
         }
@@ -119,30 +119,45 @@ bool worker_loop::read_line() noexcept
     return false;
 }
 
-bool worker_loop::next_request() noexcept
+bool worker_loop::recv_request_cmd(
+        char (&buf_in_name)[256], size_t &buf_in_pos, size_t &buf_in_len,
+        char (&buf_out_name)[256], size_t &buf_out_file_size,
+        char *meta, size_t meta_len) noexcept
 {
     if (!read_line())
         return false;
 
-    size_t buf_in_pos;
-    size_t buf_in_len;
-    size_t buf_out_file_size;
     int readed;
-    int parsed = sscanf(ln, "IN SHM %255s %" SCNuPTR ", %" SCNuPTR
-            " OUT SHM %255s %" SCNuPTR " META %n", buf_in_name, &buf_in_pos,
-            &buf_in_len, buf_out_name, &buf_out_file_size, &readed);
+    int parsed = sscanf(_ln, "IN SHM %255s %" SCNuPTR ", %" SCNuPTR
+            " OUT SHM %255s %" SCNuPTR " META %n",
+            buf_in_name, &buf_in_pos, &buf_in_len,
+            buf_out_name, &buf_out_file_size, &readed);
     if (parsed != 5) {
-        pruv_log(LOG_ERR, "Error parsing \"%s\"", ln);
+        pruv_log(LOG_ERR, "Error parsing \"%s\"", _ln);
         return false;
     }
 
-    strncpy(req_meta, &ln[readed], sizeof(req_meta));
-    if (*std::prev(std::end(req_meta))) {
+    strncpy(meta, &_ln[readed], meta_len);
+    if (meta[meta_len - 1]) {
         pruv_log(LOG_ERR, "Request meta too long.");
         return false;
     }
 
-    shmem_buffer *buf_in = buf_in_cache.get(buf_in_name);
+    return true;
+}
+
+bool worker_loop::next_request() noexcept
+{
+    size_t buf_in_pos;
+    size_t buf_in_len;
+    size_t buf_out_file_size;
+    if (!recv_request_cmd(
+                _buf_in_name, buf_in_pos, buf_in_len,
+                _buf_out_name, buf_out_file_size,
+                _req_meta, sizeof(_req_meta)))
+        return false;
+
+    shmem_buffer *buf_in = _buf_in_cache.get(_buf_in_name);
     if (!buf_in)
         return false;
     size_t buf_in_base_pos = buf_in_pos & ~shmem_buffer::PAGE_SIZE_MASK;
@@ -156,44 +171,50 @@ bool worker_loop::next_request() noexcept
     }
     buf_in->move_ptr((ptrdiff_t)buf_in_pos - (ptrdiff_t)buf_in->cur_pos());
 
-    shmem_buffer *buf_out = buf_out_cache.get(buf_out_name);
+    shmem_buffer *buf_out = _buf_out_cache.get(_buf_out_name);
     if (!buf_out)
         return false;
     buf_out->update_file_size(buf_out_file_size);
 
-    request_buf = buf_in;
-    request = buf_in->map_ptr();
-    request_len = buf_in_len;
-    response_buf = buf_out;
+    _request_buf = buf_in;
+    _request = buf_in->map_ptr();
+    _request_len = buf_in_len;
+    _response_buf = buf_out;
     return true;
 }
 
 bool worker_loop::send_last_response() noexcept
 {
     bool ok = true;
-    if (response_buf->map_end() - response_buf->map_begin() >
+    if (_response_buf->map_end() - _response_buf->map_begin() >
             (ptrdiff_t)RESPONSE_CHUNK)
-        ok &= response_buf->unmap();
+        ok &= _response_buf->unmap();
     if (!ok) {
-        response_buf = nullptr;
+        _response_buf = nullptr;
         return false;
     }
 
-    ok &= printf("RESP %" PRIuPTR " of %" PRIuPTR " END\n",
-            response_buf->data_size(), response_buf->file_size()) >= 0;
-    ok &= fflush(stdout) == 0;
-    response_buf = nullptr;
+    ok &= emit_last_response_cmd();
+    _response_buf = nullptr;
     return ok;
+}
+
+bool worker_loop::emit_last_response_cmd() noexcept
+{
+    return
+        printf("RESP %" PRIuPTR " of %" PRIuPTR " END\n",
+            _response_buf->data_size(), _response_buf->file_size()) >= 0 &&
+        fflush(stdout) == 0;
 }
 
 bool worker_loop::clean_after_request() noexcept
 {
-    assert(request_buf);
+    assert(_request_buf);
     bool ok = true;
-    if (request_buf->map_offset() +
-            (request_buf->map_end() - request_buf->map_begin()) > REQUEST_CHUNK)
-        ok &= request_buf->unmap();
-    request_buf = nullptr;
+    if (_request_buf->map_offset() +
+        (_request_buf->map_end() - _request_buf->map_begin()) > REQUEST_CHUNK)
+        ok &= _request_buf->unmap();
+    _request_buf = nullptr;
     return ok;
 }
 

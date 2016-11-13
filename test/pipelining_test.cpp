@@ -273,8 +273,7 @@ struct pipeline : loop_fixture, ::testing::WithParamInterface<bool> {
 struct redundant_worker : public worker_loop {
     virtual int handle_request() noexcept override
     {
-        if (!generate_response(get_request(), get_request_len(),
-                    *get_response_buf()))
+        if (!generate_response(request(), request_len(), *response_buf()))
             return EXIT_FAILURE;
         return send_last_response() ? EXIT_SUCCESS : EXIT_FAILURE;
     }
