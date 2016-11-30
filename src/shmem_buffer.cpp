@@ -24,6 +24,10 @@ namespace pruv {
 size_t const shmem_buffer::PAGE_SIZE = sysconf(_SC_PAGE_SIZE);
 size_t const shmem_buffer::PAGE_SIZE_MASK = PAGE_SIZE - 1;
 
+shmem_buffer::shmem_buffer() noexcept
+{
+}
+
 shmem_buffer::~shmem_buffer()
 {
     if (name_)
@@ -201,11 +205,13 @@ bool shmem_buffer::close() noexcept
         name_ = nullptr;
     }
 
-    if (::close(fd) == -1) {
-        pruv_log_syserr(LOG_ERR, "close");
-        res = false;
+    if (fd != -1) {
+        if (::close(fd) == -1) {
+            pruv_log_syserr(LOG_ERR, "close");
+            res = false;
+        }
+        pruv_log(LOG_DEBUG, "Closed shared memory object, fd = %d", fd);
     }
-    pruv_log(LOG_DEBUG, "Closed shared memory object, fd = %d", fd);
     fd = -1;
     file_size_ = 0;
     return res;

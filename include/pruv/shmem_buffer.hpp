@@ -11,6 +11,7 @@ namespace pruv {
 
 class shmem_buffer {
 public:
+    shmem_buffer() noexcept;
     ~shmem_buffer();
     /// Open existing (if name not null) or create new (if name is null)
     /// shared memory object.

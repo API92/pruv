@@ -26,7 +26,7 @@ find_path(LIBUV_INCLUDE_DIR
   HINTS ${_LIBUV_ROOT_HINTS_AND_PATHS}
   PATH_SUFFIXES include)
 find_library(LIBUV_LIBRARY
-  NAMES uv libuv
+  NAMES libuv.so uv libuv
   HINTS ${_LIBUV_ROOT_HINTS_AND_PATHS}
   PATH_SUFFIXES lib lib64)
 find_package_handle_standard_args(Libuv "Could NOT find libuv, try to set the path to the libuv root folder in the system variable LIBUV_ROOT_DIR"

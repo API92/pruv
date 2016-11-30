@@ -26,7 +26,7 @@ find_path(HTTP_PARSER_INCLUDE_DIR
   HINTS ${_HTTP_PARSER_ROOT_HINTS_AND_PATHS}
   PATH_SUFFIXES include)
 find_library(HTTP_PARSER_LIBRARY
-  NAMES http_parser libhttp_parser
+  NAMES libhttp_parser.so http_parser libhttp_parser
   HINTS ${_HTTP_PARSER_ROOT_HINTS_AND_PATHS}
   PATH_SUFFIXES lib lib64)
 find_package_handle_standard_args(HttpParser "Could NOT find http-parser, try to set the path to the http-parser root folder in the system variable HTTP_PARSER_ROOT_DIR"
