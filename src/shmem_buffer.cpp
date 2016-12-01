@@ -36,6 +36,11 @@ shmem_buffer::~shmem_buffer()
 
 bool shmem_buffer::open(const char *name, bool for_write) noexcept
 {
+    if (name_ || fd != -1) {
+        pruv_log(LOG_ERR, "Attempt to reopen not closed shmem_buffer.");
+        return false;
+    }
+
     mode_t mode = 0;
     int oflag = O_RDONLY;
     if (for_write)
