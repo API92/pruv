@@ -16,7 +16,7 @@ find_path(pruv_INCLUDE_DIR
 find_library(pruv_LIBRARY
     NAMES pruv libpruv
     PATHS ${CMAKE_CURRENT_LIST_DIR}
-    PATH_SUFFIXES bin/${CMAKE_BUILD_TYPE})
+    PATH_SUFFIXES bin/${CMAKE_CXX_COMPILER_ID}/${CMAKE_BUILD_TYPE})
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(pruv

@@ -28,11 +28,11 @@ find_path(GTEST_INCLUDE_DIR
 find_library(GTEST_LIBRARY
   NAMES libgtest.so gtest libgtest
   HINTS ${_GTEST_ROOT_HINTS_AND_PATHS}
-  PATH_SUFFIXES build lib lib64)
+  PATH_SUFFIXES build/${CMAKE_CXX_COMPILER_ID}/${CMAKE_BUILD_TYPE} lib lib64)
 find_library(GTEST_MAIN_LIBRARY
   NAMES libgtest_main.a gtest_main libgtest_main
   HINTS ${_GTEST_ROOT_HINTS_AND_PATHS}
-  PATH_SUFFIXES build lib lib64)
+  PATH_SUFFIXES build/${CMAKE_CXX_COMPILER_ID}/${CMAKE_BUILD_TYPE} lib lib64)
 find_package_handle_standard_args(Gtest "Could NOT find Google Test, try to set the path to the googletest root folder in the system variable GTEST_ROOT_DIR"
   GTEST_LIBRARY
   GTEST_MAIN_LIBRARY
