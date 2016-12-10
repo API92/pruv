@@ -12,6 +12,7 @@ namespace pruv {
 
 class worker_loop {
 public:
+    worker_loop();
     static int setup(int argc, char const * const *argv) noexcept;
     static int argc() noexcept;
     static char const * const * argv() noexcept;
@@ -39,8 +40,8 @@ private:
     bool next_request() noexcept;
     bool clean_after_request() noexcept;
 
-    shmem_cache _buf_in_cache;
-    shmem_cache _buf_out_cache;
+    shmem_cache _buf_in_cache {false};
+    shmem_cache _buf_out_cache {true};
     char *_request = nullptr;
     size_t _request_len = 0;
     shmem_buffer *_request_buf = nullptr;

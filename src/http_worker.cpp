@@ -23,8 +23,9 @@ http_worker::headers::~headers()
     clear();
 }
 
-http_worker::header * http_worker::headers::emplace_back(char const *field,
-        char const *value) noexcept
+http_worker::header * http_worker::headers::emplace_back(
+        std::experimental::string_view field,
+        std::experimental::string_view value) noexcept
 {
     header *h = header_cache::alloc_with_new_handler();
     if (h) {
@@ -41,6 +42,7 @@ void http_worker::headers::clear() noexcept
     while (!empty()) {
         header *h = &front();
         h->remove_from_list();
+        h->~header();
         header_cache::free(h);
     }
 }
@@ -68,6 +70,7 @@ void http_worker::body::clear() noexcept
     while (!empty()) {
         body_chunk *h = &front();
         h->remove_from_list();
+        h->~body_chunk();
         body_cache::free(h);
     }
 }
@@ -93,26 +96,16 @@ struct http_worker::req_settings : http_parser_settings {
     static int on_url_cb(http_parser *parser, char const *p, size_t len)
         noexcept {
         http_worker *w = reinterpret_cast<http_worker *>(parser->data);
-        w->_url = const_cast<char *>(p);
-        size_t end_pos = p - w->request() + len;
-        if (end_pos >= w->request_len()) {
-            pruv_log(LOG_ERR, "Parsed URI path too long.");
-            return 1;
-        }
-        w->request()[end_pos] = 0;
+        w->_url = std::experimental::string_view(p, len);
         return 0;
     }
 
     static int on_header_field_cb(http_parser *parser, char const *p,
             size_t len) noexcept {
         http_worker *w = reinterpret_cast<http_worker *>(parser->data);
-        size_t end_pos = p - w->request() + len;
-        if (end_pos >= w->request_len()) {
-            pruv_log(LOG_ERR, "Parsed header field is too long");
-            return 1;
-        }
-        w->request()[end_pos] = 0;
-        if (!w->_headers.emplace_back(p, nullptr))
+        if (!w->_headers.emplace_back(
+                    std::experimental::string_view(p, len),
+                    std::experimental::string_view(nullptr, 0)))
             return 1;
         return 0;
     }
@@ -120,17 +113,11 @@ struct http_worker::req_settings : http_parser_settings {
     static int on_header_value_cb(http_parser *parser, char const *p,
             size_t len) noexcept {
         http_worker *w = reinterpret_cast<http_worker *>(parser->data);
-        size_t end_pos = p - w->request() + len;
-        if (end_pos >= w->request_len()) {
-            pruv_log(LOG_ERR, "Parsed header value is too long");
-            return 1;
-        }
-        w->request()[end_pos] = 0;
         if (w->_headers.empty()) {
             pruv_log(LOG_WARNING, "Header field not parsed before value");
             return 1;
         }
-        w->_headers.back().value = p;
+        w->_headers.back().value = std::experimental::string_view(p, len);
         return 0;
     }
 
@@ -149,14 +136,14 @@ int http_worker::handle_request() noexcept
     http_parser parser;
     http_parser_init(&parser, HTTP_REQUEST);
     parser.data = this;
-    _url = nullptr;
+    _url = std::experimental::string_view(nullptr, 0);
     _headers.clear();
     _keep_alive = false;
 
     size_t nparsed = http_parser_execute(&parser, &settings,
             request(), request_len());
 
-    if (nparsed != request_len() || !_url) {
+    if (nparsed != request_len() || _url.empty()) {
         pruv_log(LOG_WARNING, "HTTP parsing error");
         return send_empty_response("400 Bad Request");
     }
@@ -253,10 +240,15 @@ bool http_worker::complete_body() noexcept
 
 int http_worker::do_response() noexcept
 {
+    if (url().size() > 50)
+        return send_empty_response("414 Request-URL Too Long");
+    char buf[51] = {};
+    memcpy(buf, url().data(), url().size());
+
     char op[20];
     int64_t value;
     int ret;
-    if ((ret = sscanf(url(), "%*[/]%[^/]%*[/]%" SCNd64, op, &value)) != 2)
+    if ((ret = sscanf(buf, "%*[/]%[^/]%*[/]%" SCNd64, op, &value)) != 2)
         return send_empty_response("404 Not Found");
 
     if (!strcmp(op, "double"))

@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <experimental/string_view>
+
 #include <http_parser.h>
 
 #include <pruv/list_node.hpp>
@@ -14,22 +16,21 @@ namespace pruv {
 class http_worker : public worker_loop {
 public:
     struct header : list_node<header> {
-        header(char const *f, char const *v) : field(f), value(v) {}
-        char const *field;
-        char const *value;
+        header(std::experimental::string_view f,
+                std::experimental::string_view v) : field(f), value(v) {}
+        std::experimental::string_view field;
+        std::experimental::string_view value;
     };
 
     struct headers : list_node<header> {
         ~headers();
-        header * emplace_back(char const *field, char const *value) noexcept;
+        header * emplace_back(std::experimental::string_view field,
+                std::experimental::string_view value) noexcept;
         void clear() noexcept;
     };
 
-    struct body_chunk : list_node<body_chunk> {
-        body_chunk(char const *data, size_t length) :
-            data(data), length(length) {}
-        char const *data;
-        size_t length;
+    struct body_chunk : std::experimental::string_view, list_node<body_chunk> {
+        using std::experimental::string_view::string_view;
     };
 
     struct body : list_node<body_chunk> {
@@ -39,7 +40,7 @@ public:
     };
 
     http_method method() const { return _method; }
-    char * url() const { return _url; }
+    std::experimental::string_view const & url() const { return _url; }
     /// Request headers.
     struct headers const & headers() const { return _headers; }
     /// Request body.
@@ -65,7 +66,7 @@ private:
 
     // request info
     http_method _method;
-    char *_url = nullptr;
+    std::experimental::string_view _url {nullptr, 0};
     struct headers _headers;
     struct body _body;
     bool _keep_alive;

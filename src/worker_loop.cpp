@@ -33,6 +33,8 @@ void termhdlr(int sig)
 int worker_loop::_argc = 0;
 char const * const * worker_loop::_argv = nullptr;
 
+worker_loop::worker_loop() {}
+
 int worker_loop::setup(int argc, char const * const *argv) noexcept
 {
     _argc = argc;
