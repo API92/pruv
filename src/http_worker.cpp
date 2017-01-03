@@ -139,6 +139,7 @@ int http_worker::handle_request() noexcept
     _url = std::experimental::string_view(nullptr, 0);
     _headers.clear();
     _keep_alive = false;
+    _body.clear();
 
     size_t nparsed = http_parser_execute(&parser, &settings,
             request(), request_len());
