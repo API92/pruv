@@ -72,7 +72,7 @@ add_library(${PROJECT_NAME}
     src/worker_loop.cpp
 )
 
-target_compile_options(${PROJECT_NAME} PUBLIC -fno-exceptions -fno-rtti)
+target_compile_options(${PROJECT_NAME} PUBLIC -fPIC -fno-exceptions -fno-rtti)
 
 add_executable(${PROJECT_NAME}d
     daemon/main.cpp
@@ -121,18 +121,3 @@ set_property(TARGET ${PROJECT_NAME}d PROPERTY CXX_STANDARD_REQUIRED ON)
 set_property(TARGET ${PROJECT_NAME}_test PROPERTY CXX_EXTENSIONS OFF)
 set_property(TARGET ${PROJECT_NAME}_test PROPERTY CXX_STANDARD 14)
 set_property(TARGET ${PROJECT_NAME}_test PROPERTY CXX_STANDARD_REQUIRED ON)
-
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:pruv> ${PROJECT_SOURCE_DIR}/bin/${CMAKE_CXX_COMPILER_ID}/${CMAKE_BUILD_TYPE}/$<TARGET_FILE_NAME:pruv>
-    VERBATIM
-)
-
-add_custom_command(TARGET ${PROJECT_NAME}d POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:pruvd> ${PROJECT_SOURCE_DIR}/bin/${CMAKE_CXX_COMPILER_ID}/${CMAKE_BUILD_TYPE}/$<TARGET_FILE_NAME:pruvd>
-    VERBATIM
-)
-
-add_custom_command(TARGET ${PROJECT_NAME}_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:pruv_test> ${PROJECT_SOURCE_DIR}/bin/${CMAKE_CXX_COMPILER_ID}/${CMAKE_BUILD_TYPE}/$<TARGET_FILE_NAME:pruv_test>
-    VERBATIM
-)
