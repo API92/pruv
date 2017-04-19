@@ -2,3 +2,5 @@ build*
 bin*
 *.pyc
 *.user
+*.swp
+compile_commands.json
