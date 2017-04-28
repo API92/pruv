@@ -108,8 +108,7 @@ bool dispatcher::start_server(const char *ip, int port) noexcept
             pruv_log_uv_err(LOG_EMERG, "uv_ip6_addr", r2);
             return false;
         }
-        else
-            addr = (sockaddr *)&addr6;
+        addr = (sockaddr *)&addr6;
     }
     else
         addr = (sockaddr *)&addr4;
@@ -295,7 +294,7 @@ void dispatcher::read_con_cb(tcp_context *con, ssize_t nread, const uv_buf_t *)
 
     if (con->list_id != tcp_context::LIST_SCHEDULING && con->read_buffer &&
         con->request.pos >= con->read_buffer->data_size()) {
-        /// There is no not parsed data now.
+        /// There is no not parsed or not processed data now.
         return_buffer(&con->read_buffer, true);
         if (!con->parse_request(nullptr))
             con->remove_from_dispatcher();
@@ -318,9 +317,8 @@ void dispatcher::respond_or_enqueue(tcp_context *con) noexcept
     con->resp_buffers.push_back(buf);
     move_to(tcp_context::LIST_IO, con);
     if (!con->inplace_response(con->request, *con->read_buffer, *buf) ||
-        !con->response_ready(con->request, *buf))
+        !con->response_ready(con->read_buffer, con->request, *buf))
         return con->remove_from_dispatcher();
-
 
     if (con->request.pos + con->request.size >= con->read_buffer->data_size()) {
         return_buffer(&con->read_buffer, true);
@@ -398,7 +396,8 @@ void dispatcher::schedule() noexcept
     uv_buf_t bufs[3] = {uv_buf_init(w.pipe_buf, req_len)};
     size_t bn = 1;
     if (con->request.meta && *con->request.meta)
-        bufs[bn++] = uv_buf_init(con->request.meta, strlen(con->request.meta));
+        bufs[bn++] = {const_cast<char *>(con->request.meta),
+            strlen(con->request.meta)};
     bufs[bn++] = uv_buf_init(&(w.pipe_buf[req_len] = '\n'), 1);
     int r = uv_write(&w.write_req, (uv_stream_t *)&w.in, bufs, bn,
         [](uv_write_t *req, int status) {
@@ -459,7 +458,6 @@ void dispatcher::on_worker_read(worker_process *w, ssize_t nread,
 
     assert(w->in_buf);
     assert(w->out_buf);
-
     // To reduce number of ftruncate syscals transfer changed size of shared
     // memory object through pipe.
     w->out_buf->update_file_size(resp_file_size);
@@ -471,9 +469,6 @@ void dispatcher::on_worker_read(worker_process *w, ssize_t nread,
         assert(con->list_id == tcp_context::LIST_PROCESSING);
 
         assert(!con->read_buffer || con->read_buffer == w->in_buf);
-        if (con->read_buffer &&
-            con->request.pos + con->request.size >= w->in_buf->data_size())
-            return_buffer(&con->read_buffer, true);
         w->in_buf = nullptr;
 
         assert(!w->out_buf->cur_pos());
@@ -494,10 +489,15 @@ void dispatcher::on_worker_read(worker_process *w, ssize_t nread,
     free_workers.push_back(w);
 
     if (con) {
+        if (!con->response_ready(con->read_buffer, con->request,
+                con->resp_buffers.back()))
+            con->remove_from_dispatcher();
+        if (con->read_buffer && con->request.pos + con->request.size >=
+                con->read_buffer->data_size())
+            return_buffer(&con->read_buffer, true);
         // May be some part of new request was readed with previous one (but
         // not parsed yet). If so parse it.
-        if (con->response_ready(con->request, con->resp_buffers.back()) &&
-            con->parse_request(con->read_buffer)) {
+        if (con->parse_request(con->read_buffer)) {
             // If resp_buffers size becames 1 now then writing not started yet.
             // If resp_buffers size > 1 then writing of some other buffer
             // already in progress.
@@ -628,11 +628,10 @@ void dispatcher::move_to(tcp_context::list_id_enum dst, tcp_context *con)
             tcp_context::list_names[dst]);
 }
 
-dispatcher::shmem_buffer_node *
-dispatcher::get_buffer(bool for_request) noexcept
+dispatcher::shmem_buffer_node * dispatcher::get_buffer(bool for_req) noexcept
 {
     assert(loop);
-    list_node<shmem_buffer_node> &list = (for_request ? req_bufs : resp_bufs);
+    list_node<shmem_buffer_node> &list = (for_req ? req_bufs : resp_bufs);
     if (!list.empty()) {
         shmem_buffer_node *buf = &list.front();
         buf->remove_from_list();
@@ -648,32 +647,30 @@ dispatcher::get_buffer(bool for_request) noexcept
     }
     if (!buf->open(nullptr, true))
         return nullptr;
-    if (!buf->reset_defaults(for_request ? REQUEST_CHUNK : RESPONSE_CHUNK)) {
+    if (!buf->reset_defaults(for_req ? REQUEST_CHUNK : RESPONSE_CHUNK)) {
         buf->close();
         return nullptr;
     }
     return buf.release();
 }
 
-void dispatcher::return_buffer(shmem_buffer_node &buf, bool for_request)
-    noexcept
+void dispatcher::return_buffer(shmem_buffer_node &buf, bool for_req) noexcept
 {
     if (!buf.empty())
         buf.remove_from_list();
-    if (!buf.reset_defaults(for_request ? REQUEST_CHUNK : RESPONSE_CHUNK)) {
+    if (!buf.reset_defaults(for_req ? REQUEST_CHUNK : RESPONSE_CHUNK)) {
         buf.close();
         delete &buf;
         return;
     }
     assert(!buf.cur_pos()); // after reset_defaults
     buf.set_data_size(0);
-    (for_request ? req_bufs : resp_bufs).push_front(&buf);
+    (for_req ? req_bufs : resp_bufs).push_front(&buf);
 }
 
-void dispatcher::return_buffer(shmem_buffer_node **buf, bool for_request)
-    noexcept
+void dispatcher::return_buffer(shmem_buffer_node **buf, bool for_req) noexcept
 {
-    return_buffer(**buf, for_request);
+    return_buffer(**buf, for_req);
     *buf = nullptr;
 }
 
@@ -700,11 +697,10 @@ bool dispatcher::start_timer() noexcept
         return false;
     }
 
+    timer.data = this;
     auto timeout_cb = [](uv_timer_t *t) {
         reinterpret_cast<dispatcher *>(t->data)->on_timer_tick();
     };
-
-    timer.data = this;
     if ((r = uv_timer_start(&timer, timeout_cb, 0, TIMER_PERIOD)) < 0) {
         pruv_log_uv_err(LOG_ERR, "uv_timer_start", r);
         return false;

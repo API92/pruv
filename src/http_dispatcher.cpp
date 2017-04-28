@@ -71,6 +71,12 @@ bool http_dispatcher::tcp_http_context::parse_request(shmem_buffer *buf)
         return false;
     }
 
+    if (req_end) {
+        if (!buf->seek(buf->data_size(), REQUEST_CHUNK))
+            return false;
+        *buf->map_ptr() = 0;
+        buf->set_data_size(buf->data_size() + 1);
+    }
     request_len = buf->data_size();
     return true;
 }
@@ -90,8 +96,8 @@ bool http_dispatcher::tcp_http_context::inplace_response(const request_meta &,
     return false;
 }
 
-bool http_dispatcher::tcp_http_context::response_ready(const request_meta &,
-        const shmem_buffer &resp_buf) noexcept
+bool http_dispatcher::tcp_http_context::response_ready(shmem_buffer *,
+        const request_meta &, const shmem_buffer &resp_buf) noexcept
 {
     assert(req_end);
     // Initialize response parser before first chunk of data.

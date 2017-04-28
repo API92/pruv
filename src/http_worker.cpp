@@ -139,12 +139,14 @@ int http_worker::handle_request() noexcept
     _url = std::experimental::string_view(nullptr, 0);
     _headers.clear();
     _keep_alive = false;
+    _zt = strstr(req_meta(), "zt=1");
     _body.clear();
 
+    size_t parselen = request_len() - _zt;
     size_t nparsed = http_parser_execute(&parser, &settings,
-            request(), request_len());
+            request(), parselen);
 
-    if (nparsed != request_len() || _url.empty()) {
+    if (nparsed != parselen || _url.empty()) {
         pruv_log(LOG_WARNING, "HTTP parsing error");
         return send_empty_response("400 Bad Request");
     }

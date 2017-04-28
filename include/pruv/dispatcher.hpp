@@ -41,7 +41,7 @@ protected:
         struct request_meta {
             size_t pos = 0;
             size_t size = 0;
-            char *meta = nullptr;
+            char const *meta = nullptr;
             void *opaque = nullptr;
             bool inplace = false;
         };
@@ -62,8 +62,9 @@ protected:
         /// Called after response message received from worker or
         /// when inplace response generated.
         /// If returns false, connection will be closed.
-        virtual bool response_ready(const request_meta &r,
-                const shmem_buffer &resp_buf) noexcept = 0;
+        virtual bool response_ready(shmem_buffer *req_buf,
+                const request_meta &r, const shmem_buffer &resp_buf)
+            noexcept = 0;
         /// Called before sending data currently mapped in the buf.
         /// If returns false, connection will be closed.
         virtual bool parse_response(shmem_buffer &buf) noexcept = 0;
@@ -193,11 +194,11 @@ private:
     void move_to(tcp_context::list_id_enum dst, tcp_context *con) noexcept;
 
     /// Take buffer from cache or create new.
-    shmem_buffer_node * get_buffer(bool for_request) noexcept;
+    shmem_buffer_node * get_buffer(bool for_req) noexcept;
     /// Return buffer into cache. Remove buffer from its current list.
-    void return_buffer(shmem_buffer_node &buf, bool for_request) noexcept;
+    void return_buffer(shmem_buffer_node &buf, bool for_req) noexcept;
     /// Return buffer into cache. Remove buffer from its current list.
-    void return_buffer(shmem_buffer_node **buf, bool for_request) noexcept;
+    void return_buffer(shmem_buffer_node **buf, bool for_req) noexcept;
     /// Close all shared memory objects in list and free memory.
     /// Must be called only when there is no references to any buffer
     /// in the buf_list.

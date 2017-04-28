@@ -21,8 +21,9 @@ protected:
         virtual bool get_request(request_meta &r) noexcept override;
         virtual bool inplace_response(const request_meta &r,
                 shmem_buffer &buf_in, shmem_buffer &buf_out) noexcept override;
-        virtual bool response_ready(const request_meta &r,
-                const shmem_buffer &resp_buf) noexcept override;
+        virtual bool response_ready(shmem_buffer *req_buf,
+                const request_meta &r, const shmem_buffer &resp_buf) noexcept
+            override;
 
         virtual bool parse_response(shmem_buffer &buf) noexcept override;
         virtual bool finish_response(const shmem_buffer &buf) noexcept override;
@@ -40,6 +41,8 @@ protected:
         /// Calculated while parsing response.
         /// Used when writing response finished.
         bool keep_alive;
+        bool appended_terminator;
+        char req_terminator;
     };
 
     virtual http_pipelining_context * create_connection() noexcept override;

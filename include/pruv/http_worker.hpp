@@ -46,6 +46,7 @@ public:
     /// Request body.
     struct body const & body() const { return _body; }
     bool keep_alive() const { return _keep_alive; }
+    bool zero_terminated_request() const { return _zt; }
     void set_keep_alive(bool value) { _keep_alive = value; }
 
 protected:
@@ -70,6 +71,7 @@ private:
     struct headers _headers;
     struct body _body;
     bool _keep_alive;
+    bool _zt;
 
     // response info
     size_t _body_pos;

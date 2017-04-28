@@ -28,7 +28,7 @@ struct test_context : common_dispatcher<test_context>::tcp_context {
     virtual bool inplace_response(const request_meta &r,
             shmem_buffer &buf_in, shmem_buffer &buf_out) noexcept override;
 
-    virtual bool response_ready(const request_meta &r,
+    virtual bool response_ready(shmem_buffer *, const request_meta &r,
             const shmem_buffer &resp_buf) noexcept override;
     virtual bool parse_response(shmem_buffer &buf) noexcept override;
     virtual bool finish_response(const shmem_buffer &buf) noexcept override;
@@ -82,7 +82,7 @@ bool test_context::inplace_response(const request_meta &,
     return false;
 }
 
-bool test_context::response_ready(const request_meta &r,
+bool test_context::response_ready(shmem_buffer *, const request_meta &r,
         const shmem_buffer &resp_buf) noexcept
 {
     EXPECT_TRUE(req_end);

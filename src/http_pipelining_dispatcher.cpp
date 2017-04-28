@@ -24,7 +24,8 @@ void http_pipelining_dispatcher::free_connection(tcp_context *con) noexcept
 
 http_pipelining_dispatcher::http_pipelining_context::http_pipelining_context()
     noexcept :
-    request_pos(0), req_end(false), wait_response(false), keep_alive(false)
+    request_pos(0), req_end(false), wait_response(false), keep_alive(false),
+    appended_terminator(false)
 {
     prepare_for_request();
     http_parser_init(&parser_out, HTTP_RESPONSE);
@@ -33,7 +34,7 @@ http_pipelining_dispatcher::http_pipelining_context::http_pipelining_context()
 void http_pipelining_dispatcher::http_pipelining_context::prepare_for_request()
     noexcept
 {
-    request_pos += request_len;
+    request_pos += request_len + appended_terminator;
     request_len = 0;
     http_parser_init(&parser_in, HTTP_REQUEST);
 }
@@ -87,6 +88,29 @@ bool http_pipelining_dispatcher::http_pipelining_context::parse_request(
         }
         request_len += nparsed;
     }
+    if (req_end) {
+        // Add zero terminator for using insitu parsers in worker.
+        size_t term_pos = request_pos + request_len;
+        if (!buf->seek(term_pos, REQUEST_CHUNK))
+            return false;
+        req_terminator = *buf->map_ptr();
+        *buf->map_ptr() = 0;
+        if (term_pos + 1 >= buf->data_size()) {
+            // > To protect from next incoming request override this character.
+            // >= To protect from releasing "fully parsed" buffer.
+            appended_terminator = true;
+            buf->set_data_size(buf->data_size() + 1);
+            if (term_pos < buf->data_size()) {
+                if (!buf->seek(term_pos + 1, REQUEST_CHUNK))
+                    return false;
+                *buf->map_ptr() = req_terminator;
+                if (!buf->seek(term_pos, REQUEST_CHUNK))
+                    return false;
+            }
+        }
+        else
+            appended_terminator = false;
+    }
     return true;
 }
 
@@ -100,8 +124,8 @@ bool http_pipelining_dispatcher::http_pipelining_context::get_request(
         request_meta &r) noexcept
 {
     r.pos = request_pos;
-    r.size = request_len;
-    r.meta = nullptr;
+    r.size = request_len + 1;
+    r.meta = "zt=1";
     r.inplace = false;
     if (req_end && !wait_response) {
         wait_response = true;
@@ -113,12 +137,20 @@ bool http_pipelining_dispatcher::http_pipelining_context::get_request(
 }
 
 bool http_pipelining_dispatcher::http_pipelining_context::response_ready(
-        const request_meta &, const shmem_buffer &resp_buf) noexcept
+        shmem_buffer *req_buf, const request_meta &req,
+        const shmem_buffer &resp_buf) noexcept
 {
     if ((resp_sum_size += resp_buf.data_size()) >= 10 * 1024 * 1024)
         return false;
     if (++resp_cnt > 10)
         return false;
+    if (!appended_terminator) {
+        assert(req_buf);
+        size_t term_pos = req.pos + req.size - 1;
+        if (!req_buf->seek(term_pos, REQUEST_CHUNK))
+            return false;
+        *req_buf->map_ptr() = req_terminator;
+    }
     req_end = wait_response = false;
     return true;
 }
