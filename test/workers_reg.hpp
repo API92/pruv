@@ -2,6 +2,7 @@
  * Copyright (C) Andrey Pikas
  */
 
+#include <functional>
 #include <memory>
 #include <utility>
 #include <vector>

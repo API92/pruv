@@ -6,6 +6,7 @@
 
 #include <cstring> // strcmp, strlen
 #include <functional> // hash
+#include <string_view>
 
 #include <pruv/log.hpp>
 
@@ -25,7 +26,7 @@ struct entry : hash_table::entry {
 
 size_t cstr_hash(char const *s, size_t len) noexcept
 {
-    return std::_Hash_impl::hash(s, len);
+    return std::hash<std::string_view>()(std::string_view(s, len));
 }
 
 } // namepspace

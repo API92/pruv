@@ -24,8 +24,7 @@ http_worker::headers::~headers()
 }
 
 http_worker::header * http_worker::headers::emplace_back(
-        std::experimental::string_view field,
-        std::experimental::string_view value) noexcept
+        std::string_view field, std::string_view value) noexcept
 {
     header *h = header_cache::alloc_with_new_handler();
     if (h) {
@@ -96,7 +95,7 @@ struct http_worker::req_settings : http_parser_settings {
     static int on_url_cb(http_parser *parser, char const *p, size_t len)
         noexcept {
         http_worker *w = reinterpret_cast<http_worker *>(parser->data);
-        w->_url = std::experimental::string_view(p, len);
+        w->_url = std::string_view(p, len);
         return 0;
     }
 
@@ -104,8 +103,8 @@ struct http_worker::req_settings : http_parser_settings {
             size_t len) noexcept {
         http_worker *w = reinterpret_cast<http_worker *>(parser->data);
         if (!w->_headers.emplace_back(
-                    std::experimental::string_view(p, len),
-                    std::experimental::string_view(nullptr, 0)))
+                    std::string_view(p, len),
+                    std::string_view(nullptr, 0)))
             return 1;
         return 0;
     }
@@ -117,7 +116,7 @@ struct http_worker::req_settings : http_parser_settings {
             pruv_log(LOG_WARNING, "Header field not parsed before value");
             return 1;
         }
-        w->_headers.back().value = std::experimental::string_view(p, len);
+        w->_headers.back().value = std::string_view(p, len);
         return 0;
     }
 
@@ -136,7 +135,7 @@ int http_worker::handle_request() noexcept
     http_parser parser;
     http_parser_init(&parser, HTTP_REQUEST);
     parser.data = this;
-    _url = std::experimental::string_view(nullptr, 0);
+    _url = std::string_view(nullptr, 0);
     _headers.clear();
     _keep_alive = false;
     _zt = strstr(req_meta(), "zt=1");
