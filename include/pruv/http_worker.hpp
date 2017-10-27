@@ -26,6 +26,12 @@ public:
         header * emplace_back(std::string_view field, std::string_view value)
             noexcept;
         void clear() noexcept;
+
+        headers() = default;
+        headers(headers const &) = delete;
+        headers(headers &&) = delete;
+        void operator = (headers const &) = delete;
+        void operator = (headers &&) = delete;
     };
 
     struct body_chunk : std::string_view, list_node<body_chunk> {
@@ -36,6 +42,12 @@ public:
         ~body();
         body_chunk * emplace_back(char const *data, size_t length) noexcept;
         void clear() noexcept;
+
+        body() = default;
+        body(body const &) = delete;
+        body(body &&) = delete;
+        void operator = (body const &) = delete;
+        void operator = (body &&) = delete;
     };
 
     http_method method() const { return _method; }

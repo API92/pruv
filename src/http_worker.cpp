@@ -8,15 +8,9 @@
 #include <cstring>
 
 #include <http_parser.h>
-#include <falloc/cache.hpp>
 #include <pruv/log.hpp>
 
 namespace pruv {
-
-typedef falloc::object_cache<http_worker::header> header_cache;
-header_cache::set_stat_interval set_header_stat(0x100000);
-typedef falloc::object_cache<http_worker::body_chunk> body_cache;
-body_cache::set_stat_interval set_body_stat(0x10000);
 
 http_worker::headers::~headers()
 {
@@ -26,11 +20,9 @@ http_worker::headers::~headers()
 http_worker::header * http_worker::headers::emplace_back(
         std::string_view field, std::string_view value) noexcept
 {
-    header *h = header_cache::alloc_with_new_handler();
-    if (h) {
-        new (h) header(field, value);
+    header *h = new (std::nothrow) header(field, value);
+    if (h)
         push_back(h);
-    }
     else
         pruv_log(LOG_EMERG, "Can't allocate memory for header");
     return h;
@@ -41,8 +33,7 @@ void http_worker::headers::clear() noexcept
     while (!empty()) {
         header *h = &front();
         h->remove_from_list();
-        h->~header();
-        header_cache::free(h);
+        delete h;
     }
 }
 
@@ -54,11 +45,9 @@ http_worker::body::~body()
 http_worker::body_chunk * http_worker::body::emplace_back(char const *data,
         size_t length) noexcept
 {
-    body_chunk *h = body_cache::alloc_with_new_handler();
-    if (h) {
-        new (h) body_chunk(data, length);
+    body_chunk *h = new (std::nothrow) body_chunk(data, length);
+    if (h)
         push_back(h);
-    }
     else
         pruv_log(LOG_EMERG, "Can't allocate memory for header");
     return h;
@@ -69,8 +58,7 @@ void http_worker::body::clear() noexcept
     while (!empty()) {
         body_chunk *h = &front();
         h->remove_from_list();
-        h->~body_chunk();
-        body_cache::free(h);
+        delete h;
     }
 }
 
