@@ -6,9 +6,9 @@
 
 #include <memory>
 
+#include <boost/intrusive/list.hpp>
 #include <uv.h>
 
-#include <pruv/list_node.hpp>
 #include <pruv/process.hpp>
 #include <pruv/shmem_buffer.hpp>
 #include <pruv/tcp_con.hpp>
@@ -17,6 +17,15 @@
 namespace pruv {
 
 class dispatcher {
+    struct auto_unlink_hook : boost::intrusive::list_base_hook<
+            boost::intrusive::link_mode<boost::intrusive::auto_unlink>> {
+        bool only_element() const { return next_ == prev_; }
+    };
+
+    template<typename T>
+    using list = boost::intrusive::list<T,
+            boost::intrusive::constant_time_size<false>>;
+
 public:
     virtual ~dispatcher();
     void set_timeouts(bool enable) noexcept;
@@ -29,13 +38,13 @@ public:
     void on_loop_exit() noexcept;
 
 private:
-    struct shmem_buffer_node : shmem_buffer, list_node<shmem_buffer_node> {};
+    struct shmem_buffer_node : shmem_buffer, auto_unlink_hook {};
 
     struct worker_process;
 
 protected:
     /// Buffered tcp connection
-    class tcp_context : private tcp_con, list_node<tcp_context> {
+    class tcp_context : private tcp_con, public auto_unlink_hook {
     public:
         virtual ~tcp_context() {}
         struct request_meta {
@@ -77,7 +86,7 @@ protected:
 
     private:
         friend dispatcher;
-        friend list_node;
+        friend auto_unlink_hook;
         dispatcher * get_dispatcher() const noexcept;
         /// Remove connection from any dispatcher's list.
         /// Return used buffers into dispatcher.
@@ -87,7 +96,7 @@ protected:
         /// Buffer for reading request.
         shmem_buffer_node *read_buffer = nullptr;
         /// Buffers with responses.
-        list_node<shmem_buffer_node> resp_buffers;
+        list<shmem_buffer_node> resp_buffers;
         /// Worker processing last request. On EOF there is no need to stop it,
         /// but its result must be ignored. Stored in connection to break
         /// reference worker->processed_con on EOF received.
@@ -120,7 +129,7 @@ protected:
     virtual void free_connection(tcp_context *con) noexcept = 0;
 
 private:
-    struct worker_process : public process, list_node<worker_process> {
+    struct worker_process : public process, auto_unlink_hook {
         /// Connection, whose request this worker process now.
         /// It's needed because on exit connection must be closed.
         tcp_context *processed_con = nullptr;
@@ -202,16 +211,16 @@ private:
     /// Close all shared memory objects in list and free memory.
     /// Must be called only when there is no references to any buffer
     /// in the buf_list.
-    void close_buffers(list_node<shmem_buffer_node> &buf_list) noexcept;
+    void close_buffers(list<shmem_buffer_node> &buf_list) noexcept;
 
     bool start_timer() noexcept;
     void close_timer() noexcept;
     /// Make cleanup routines. Check connections and workers timeouts.
     void on_timer_tick() noexcept;
     /// Close all connections in list and release its resources.
-    void close_connections(list_node<tcp_context> &list) noexcept;
+    void close_connections(list<tcp_context> &list) noexcept;
     /// Close timed out connections in list. list sorted by timeout.
-    void close_old_connections(list_node<tcp_context> &list) noexcept;
+    void close_old_connections(list<tcp_context> &list) noexcept;
 
 
     static constexpr unsigned IDLE_TIMEOUT = 30'000;
@@ -231,28 +240,28 @@ private:
     uv_timer_t timer;
 
     /// Connections in this list are inactive.
-    list_node<tcp_context> clients_idle;
+    list<tcp_context> clients_idle;
     /// Connections in this list are readed (has some not processed data)
     /// or with partially writed response.
-    list_node<tcp_context> clients_io;
+    list<tcp_context> clients_io;
     /// Connections with fully read request without worker.
     /// Connections may be readed and writed, but parsing stopped for its.
-    list_node<tcp_context> clients_scheduling;
+    list<tcp_context> clients_scheduling;
     /// Connections waits response from worker.
     /// Connections may be readed and writed, but parsing stopped for its.
-    list_node<tcp_context> clients_processing;
+    list<tcp_context> clients_processing;
 
     /// Idle workers without job.
-    list_node<worker_process> free_workers;
+    list<worker_process> free_workers;
     /// Workers serving some request now.
-    list_node<worker_process> in_use_workers;
+    list<worker_process> in_use_workers;
     /// Workers to which SIGTERM signal is sent.
-    list_node<worker_process> terminated_workers;
+    list<worker_process> terminated_workers;
 
     /// Free buffers for reading request.
-    list_node<shmem_buffer_node> req_bufs;
+    list<shmem_buffer_node> req_bufs;
     /// Free buffers for writing response.
-    list_node<shmem_buffer_node> resp_bufs;
+    list<shmem_buffer_node> resp_bufs;
 };
 
 } // namespace pruv

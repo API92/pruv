@@ -4,6 +4,7 @@
 
 #include <pruv/http_pipelining_dispatcher.hpp>
 
+#include <cinttypes>
 #include <memory.h>
 
 #include <pruv/cleanup_helpers.hpp>

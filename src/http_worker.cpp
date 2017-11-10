@@ -5,7 +5,9 @@
 #include <pruv/http_worker.hpp>
 
 #include <cinttypes>
+#include <cstdio>
 #include <cstring>
+#include <new>
 
 #include <http_parser.h>
 #include <pruv/log.hpp>
@@ -22,7 +24,7 @@ http_worker::header * http_worker::headers::emplace_back(
 {
     header *h = new (std::nothrow) header(field, value);
     if (h)
-        push_back(h);
+        push_back(*h);
     else
         pruv_log(LOG_EMERG, "Can't allocate memory for header");
     return h;
@@ -30,11 +32,7 @@ http_worker::header * http_worker::headers::emplace_back(
 
 void http_worker::headers::clear() noexcept
 {
-    while (!empty()) {
-        header *h = &front();
-        h->remove_from_list();
-        delete h;
-    }
+    clear_and_dispose([](header *h) { delete h; });
 }
 
 http_worker::body::~body()
@@ -47,7 +45,7 @@ http_worker::body_chunk * http_worker::body::emplace_back(char const *data,
 {
     body_chunk *h = new (std::nothrow) body_chunk(data, length);
     if (h)
-        push_back(h);
+        push_back(*h);
     else
         pruv_log(LOG_EMERG, "Can't allocate memory for header");
     return h;
@@ -55,11 +53,7 @@ http_worker::body_chunk * http_worker::body::emplace_back(char const *data,
 
 void http_worker::body::clear() noexcept
 {
-    while (!empty()) {
-        body_chunk *h = &front();
-        h->remove_from_list();
-        delete h;
-    }
+    clear_and_dispose([](body_chunk *b) { delete b; });
 }
 
 struct http_worker::req_settings : http_parser_settings {

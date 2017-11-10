@@ -6,22 +6,23 @@
 
 #include <string_view>
 
+#include <boost/intrusive/list.hpp>
 #include <http_parser.h>
 
-#include <pruv/list_node.hpp>
 #include <pruv/worker_loop.hpp>
 
 namespace pruv {
 
 class http_worker : public worker_loop {
 public:
-    struct header : list_node<header> {
+    struct header : boost::intrusive::list_base_hook<> {
         header(std::string_view f, std::string_view v) : field(f), value(v) {}
         std::string_view field;
         std::string_view value;
     };
 
-    struct headers : list_node<header> {
+    struct headers : boost::intrusive::list<header,
+            boost::intrusive::constant_time_size<false>> {
         ~headers();
         header * emplace_back(std::string_view field, std::string_view value)
             noexcept;
@@ -34,11 +35,11 @@ public:
         void operator = (headers &&) = delete;
     };
 
-    struct body_chunk : std::string_view, list_node<body_chunk> {
+    struct body_chunk : std::string_view, boost::intrusive::list_base_hook<> {
         using std::string_view::string_view;
     };
 
-    struct body : list_node<body_chunk> {
+    struct body : boost::intrusive::list<body_chunk> {
         ~body();
         body_chunk * emplace_back(char const *data, size_t length) noexcept;
         void clear() noexcept;

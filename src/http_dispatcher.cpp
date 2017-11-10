@@ -5,6 +5,7 @@
 #include <pruv/http_dispatcher.hpp>
 
 #include <cassert>
+#include <cinttypes>
 #include <memory.h>
 
 #include <pruv/cleanup_helpers.hpp>

@@ -2,6 +2,7 @@
  * Copyright (C) Andrey Pikas
  */
 
+#include <cinttypes>
 #include <deque>
 #include <list>
 #include <numeric>

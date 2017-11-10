@@ -45,7 +45,6 @@ add_library(${PROJECT_NAME}
     include/pruv/http_dispatcher.hpp
     include/pruv/http_pipelining_dispatcher.hpp
     include/pruv/http_worker.hpp
-    include/pruv/list_node.hpp
     include/pruv/log.hpp
     include/pruv/process.hpp
     include/pruv/random.hpp

@@ -69,10 +69,8 @@ void dispatcher::stop() noexcept
     stop_server();
     // Don't close timer.
     // It will helps to kill workers with SIGKILL if they not respond.
-    while (!free_workers.empty())
-        kill_worker(&free_workers.front());
-    while (!in_use_workers.empty())
-        kill_worker(&in_use_workers.front());
+    free_workers.clear_and_dispose([this](auto *w) { kill_worker(w); });
+    in_use_workers.clear_and_dispose([this](auto *w) { kill_worker(w); });
     close_buffers(req_bufs);
     close_buffers(resp_bufs);
     worker_args = nullptr;
@@ -155,7 +153,7 @@ void dispatcher::spawn_worker() noexcept
     // on_worker_exit callback can be called only on next loop iteration
     // after exit from this function.
     // Therefore allowed to call push_back after worker->start.
-    free_workers.push_back(worker);
+    free_workers.push_back(*worker);
     ++workers_cnt;
 
     auto alloc_cb = [](uv_handle_t *h, size_t /*sz*/, uv_buf_t *buf) {
@@ -193,7 +191,6 @@ void dispatcher::spawn_worker() noexcept
 void dispatcher::kill_worker(worker_process *w) noexcept
 {
     assert(loop);
-    assert(!w->empty()); // worker must be in some list
     if (w->processed_con)
         w->processed_con->remove_from_dispatcher();
     // Stop reading pipe to not receive eof,
@@ -203,9 +200,9 @@ void dispatcher::kill_worker(worker_process *w) noexcept
         pruv_log_uv_err(LOG_ERR, "uv_read_stop", r);
     if (!w->exited && (r = uv_process_kill(w, SIGTERM)) < 0)
         pruv_log_uv_err(LOG_ERR, "uv_process_kill", r);
-    w->remove_from_list();
+    w->unlink();
     w->timeout = uv_now(loop) + KILL_TIMEOUT;
-    terminated_workers.push_back(w);
+    terminated_workers.push_back(*w);
 }
 
 void dispatcher::on_worker_exit(worker_process *w, int64_t exit_code, int sig)
@@ -214,7 +211,6 @@ void dispatcher::on_worker_exit(worker_process *w, int64_t exit_code, int sig)
     pruv_log(LOG_NOTICE, "Worker %d exited with code %" PRId64
             " caused signal %d.", w->pid, exit_code, sig);
     w->exited = true;
-    w->remove_from_list();
     if (w->processed_con)
         w->processed_con->remove_from_dispatcher();
     // Buffers may be safely reused only after worker exit.
@@ -314,7 +310,7 @@ void dispatcher::respond_or_enqueue(tcp_context *con) noexcept
     if (!buf || !con->read_buffer)
         return con->remove_from_dispatcher();
 
-    con->resp_buffers.push_back(buf);
+    con->resp_buffers.push_back(*buf);
     move_to(tcp_context::LIST_IO, con);
     if (!con->inplace_response(con->request, *con->read_buffer, *buf) ||
         !con->response_ready(con->read_buffer, con->request, *buf))
@@ -326,7 +322,7 @@ void dispatcher::respond_or_enqueue(tcp_context *con) noexcept
             return con->remove_from_dispatcher();
     }
 
-    if (con->resp_buffers.one_element())
+    if (!con->resp_buffers.empty() && con->resp_buffers.front().only_element())
         write_con(con);
 }
 
@@ -381,13 +377,13 @@ void dispatcher::schedule() noexcept
         return return_buffer(&resp_buf, false);
 
     // Connect request and worker.
-    w.remove_from_list();
+    w.unlink();
     w.processed_con = con;
     w.in_buf = con->read_buffer;
     w.out_buf = resp_buf; // buffer owned by worker for processing time
     con->worker = &w;
     w.timeout = uv_now(loop) + PROCESSING_TIMEOUT;
-    in_use_workers.push_back(&w);
+    in_use_workers.push_back(w);
     move_to(tcp_context::LIST_PROCESSING, con);
 
     // Send request to worker.
@@ -474,7 +470,7 @@ void dispatcher::on_worker_read(worker_process *w, ssize_t nread,
         assert(!w->out_buf->cur_pos());
         assert(w->out_buf->map_ptr() != w->out_buf->map_end());
         w->out_buf->set_data_size(resp_len);
-        con->resp_buffers.push_back(w->out_buf);
+        con->resp_buffers.push_back(*w->out_buf);
         w->out_buf = nullptr;
     }
     else {
@@ -485,8 +481,8 @@ void dispatcher::on_worker_read(worker_process *w, ssize_t nread,
 
     w->io_state = worker_process::IO_IDLE;
     w->pipe_buf_ptr = w->pipe_buf;
-    w->remove_from_list();
-    free_workers.push_back(w);
+    w->unlink();
+    free_workers.push_back(*w);
 
     if (con) {
         if (!con->response_ready(con->read_buffer, con->request,
@@ -504,7 +500,8 @@ void dispatcher::on_worker_read(worker_process *w, ssize_t nread,
             // move_to LIST_IO because if do so and response is of zero
             // size then write_con() can move connection to LIST_IDLE.
             move_to(tcp_context::LIST_IO, con);
-            if (con->resp_buffers.one_element())
+            if (!con->resp_buffers.empty() &&
+                    con->resp_buffers.front().only_element())
                 write_con(con);
             if (con->get_request(con->request))
                 // With previous request the second request was fully readed too
@@ -522,7 +519,7 @@ void dispatcher::write_con(tcp_context *con) noexcept
 {
     assert(loop);
     assert(!con->resp_buffers.empty());
-    assert(!con->empty()); // must be in some list
+    assert(con->is_linked()); // must be in some list
     // Writing response for one response and scheduling/processing the second
     // response can be at the same time. In this case connection is in
     // LIST_SCHEDULING/LIST_PROCESSING.
@@ -609,20 +606,19 @@ void dispatcher::move_to(tcp_context::list_id_enum dst, tcp_context *con)
     noexcept
 {
     assert(loop);
-    if (!con->empty())
-        con->remove_from_list();
+    con->unlink();
     con->list_id = dst;
     if (dst == tcp_context::LIST_IO) {
         con->timeout = uv_now(loop) + IO_TIMEOUT;
-        clients_io.push_back(con);
+        clients_io.push_back(*con);
     }
     else if (dst == tcp_context::LIST_SCHEDULING)
-        clients_scheduling.push_back(con);
+        clients_scheduling.push_back(*con);
     else if (dst == tcp_context::LIST_PROCESSING)
-        clients_processing.push_back(con);
+        clients_processing.push_back(*con);
     else if (dst == tcp_context::LIST_IDLE) {
         con->timeout = uv_now(loop) + IDLE_TIMEOUT;
-        clients_idle.push_back(con);
+        clients_idle.push_back(*con);
     }
     pruv_log(LOG_DEBUG, "Connection moved to list %s",
             tcp_context::list_names[dst]);
@@ -631,10 +627,10 @@ void dispatcher::move_to(tcp_context::list_id_enum dst, tcp_context *con)
 dispatcher::shmem_buffer_node * dispatcher::get_buffer(bool for_req) noexcept
 {
     assert(loop);
-    list_node<shmem_buffer_node> &list = (for_req ? req_bufs : resp_bufs);
+    list<shmem_buffer_node> &list = (for_req ? req_bufs : resp_bufs);
     if (!list.empty()) {
         shmem_buffer_node *buf = &list.front();
-        buf->remove_from_list();
+        buf->unlink();
         assert(buf->data_size() == 0);
         assert(!buf->cur_pos());
         return buf;
@@ -656,8 +652,7 @@ dispatcher::shmem_buffer_node * dispatcher::get_buffer(bool for_req) noexcept
 
 void dispatcher::return_buffer(shmem_buffer_node &buf, bool for_req) noexcept
 {
-    if (!buf.empty())
-        buf.remove_from_list();
+    buf.unlink();
     if (!buf.reset_defaults(for_req ? REQUEST_CHUNK : RESPONSE_CHUNK)) {
         buf.close();
         delete &buf;
@@ -665,7 +660,7 @@ void dispatcher::return_buffer(shmem_buffer_node &buf, bool for_req) noexcept
     }
     assert(!buf.cur_pos()); // after reset_defaults
     buf.set_data_size(0);
-    (for_req ? req_bufs : resp_bufs).push_front(&buf);
+    (for_req ? req_bufs : resp_bufs).push_front(buf);
 }
 
 void dispatcher::return_buffer(shmem_buffer_node **buf, bool for_req) noexcept
@@ -674,17 +669,15 @@ void dispatcher::return_buffer(shmem_buffer_node **buf, bool for_req) noexcept
     *buf = nullptr;
 }
 
-void dispatcher::close_buffers(list_node<shmem_buffer_node> &buf_list) noexcept
+void dispatcher::close_buffers(list<shmem_buffer_node> &buf_list) noexcept
 {
     assert(loop);
-    while (!buf_list.empty()) {
-        shmem_buffer_node *buf = &buf_list.front();
-        buf->remove_from_list();
+    buf_list.clear_and_dispose([](shmem_buffer_node *buf) {
         buf->close();
         // tcp_stream and worker, which uses this buffer, must be closed before
         // and must not use buffer in close_cb.
         delete buf;
-    }
+    });
 }
 
 bool dispatcher::start_timer() noexcept
@@ -742,13 +735,13 @@ void dispatcher::on_timer_tick() noexcept
     close_old_connections(clients_io);
 }
 
-void dispatcher::close_connections(list_node<tcp_context> &list) noexcept
+void dispatcher::close_connections(list<tcp_context> &list) noexcept
 {
     while (!list.empty())
         list.front().remove_from_dispatcher();
 }
 
-void dispatcher::close_old_connections(list_node<tcp_context> &list) noexcept
+void dispatcher::close_old_connections(list<tcp_context> &list) noexcept
 {
     assert(loop);
     uint64_t now = uv_now(loop);
@@ -775,8 +768,7 @@ void dispatcher::tcp_context::remove_from_dispatcher() noexcept
     else if (read_buffer) // Can return buffer only if worker not use it.
         get_dispatcher()->return_buffer(&read_buffer, true);
 
-    if (!empty()) // may be not in any list (for example, in schedule)
-        remove_from_list();
+    unlink(); // may be not in any list (for example, in schedule)
     close();
     pruv_log(LOG_DEBUG, "Connection closed.");
 }
